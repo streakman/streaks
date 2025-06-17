@@ -13,11 +13,19 @@ openai.api_key = OPENAI_API_KEY
 
 # === Fetch recent NBA top scorers from TheSportsDB ===
 def fetch_nba_top_scorers():
-    # TheSportsDB endpoint for NBA players season stats
-    # NOTE: TheSportsDB free tier has limited endpoints; this is an example call to get NBA players
     url = f"https://www.thesportsdb.com/api/v1/json/{THESPORTSDB_API_KEY}/searchplayers.php?t=Los Angeles Lakers"
     res = requests.get(url)
-    data = res.json()
+
+    print("Response status code:", res.status_code)
+    print("Response content:", res.text)  # <-- Add this to see what you got
+
+    try:
+        data = res.json()
+    except Exception as e:
+        print("JSON decode error:", e)
+        return None  # Or handle it gracefully
+
+    # rest of your code ...
     
     if not data or not data.get('player'):
         return "No recent NBA stats found."
