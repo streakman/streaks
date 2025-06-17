@@ -1,15 +1,15 @@
 import streamlit as st
+import requests
 import openai
 import json
-from openai.error import RateLimitError
+import random
+import time
 
-OPENAI_API_KEY = st.secrets.get("openai_api_key")
-if not OPENAI_API_KEY:
-    st.error("OpenAI API key not found in secrets!")
-    st.stop()
-
+# Set your API keys
+OPENAI_API_KEY = st.secrets["openai_api_key"]
 openai.api_key = OPENAI_API_KEY
 
+# Hardcoded NFL teams list for now (avoids API-Football limits)
 NFL_TEAMS = [
     "Arizona Cardinals", "Atlanta Falcons", "Baltimore Ravens", "Buffalo Bills",
     "Carolina Panthers", "Chicago Bears", "Cincinnati Bengals", "Cleveland Browns",
@@ -21,39 +21,46 @@ NFL_TEAMS = [
     "Seattle Seahawks", "Tampa Bay Buccaneers", "Tennessee Titans", "Washington Commanders"
 ]
 
-def extract_json(text):
+def extract_json(response_text):
+    st.info("[DEBUG] Extracting JSON from OpenAI response")
     try:
-        start = text.index("[")
-        end = text.rindex("]") + 1
-        return text[start:end]
-    except ValueError:
+        start = response_text.index("[")
+        end = response_text.rindex("]") + 1
+        return response_text[start:end]
+    except ValueError as ve:
+        st.error(f"[DEBUG] JSON extraction failed: {ve}")
         return "[]"
 
-def generate_trivia_questions(teams, num=3):
+def generate_trivia_questions(teams_data):
+    st.info("[DEBUG] Generating trivia questions")
     prompt = (
-        f"Generate {num} unique NFL trivia questions using only the following team names: "
-        f"{', '.join(teams)}. Each question should be a dictionary with this structure: "
-        '{"question": ..., "choices": [...], "answer": ...}. Make sure answers are accurate.'
+        "Generate 3 unique NFL trivia questions using only these teams: "
+        f"{', '.join(teams_data)}. Each question should be a dictionary with keys: "
+        "\"question\", \"choices\" (list of 4), and \"answer\". The answer must be one of the choices."
     )
+
     try:
+        st.info("[DEBUG] Sending request to OpenAI ChatCompletion")
         response = openai.chat.completions.create(
-            model="gpt-4",
+            model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7,
-            max_tokens=1500,
+            max_tokens=1000
         )
         content = response.choices[0].message.content
-        json_str = extract_json(content)
-        questions = json.loads(json_str)
+        st.info(f"[DEBUG] OpenAI raw response: {content[:300]}...")
+        questions_json = extract_json(content)
+        questions = json.loads(questions_json)
+        st.info(f"[DEBUG] Parsed {len(questions)} questions successfully")
         return questions
-    except RateLimitError:
-        st.warning("Rate limit reached, please try again later.")
+    except openai.error.RateLimitError:
+        st.warning("[DEBUG] Rate limit exceeded. Please try again later.")
         return []
-    except json.JSONDecodeError:
-        st.error("Failed to decode JSON from OpenAI response.")
+    except json.JSONDecodeError as jde:
+        st.error(f"[DEBUG] JSON decode error: {jde}")
         return []
     except Exception as e:
-        st.error(f"Error generating questions: {e}")
+        st.error(f"[DEBUG] Unexpected error: {e}")
         return []
 
 def main():
@@ -61,36 +68,45 @@ def main():
     st.write("Test your NFL knowledge with AI-generated trivia questions!")
 
     st.info("[DEBUG] Using hardcoded NFL teams list")
-    st.write(f"Using {len(NFL_TEAMS)} NFL teams for trivia generation.")
+    st.info(f"Using {len(NFL_TEAMS)} NFL teams for trivia generation.")
 
-    st.info(f"Generating 3 trivia questions, please wait...")
-    questions = generate_trivia_questions(NFL_TEAMS, num=3)
+    st.info("Generating 3 trivia questions, please wait...")
+    questions = generate_trivia_questions(NFL_TEAMS)
 
     if not questions:
         st.error("No trivia questions available. Try again later.")
         return
 
+    st.markdown("### Today's NFL Trivia Questions")
     user_answers = []
-    for i, q in enumerate(questions, 1):
-        question = q.get("question", f"Question {i} missing")
-        choices = q.get("choices", [])
-        if not isinstance(choices, list) or len(choices) != 4:
-            st.error(f"Invalid choices format for question {i}.")
-            choices = ["N/A"] * 4
 
-        st.write(f"**Q{i}:** {question}")
-        answer = st.radio("Your answer:", choices, key=f"q{i}")
-        user_answers.append(answer)
-        st.write("---")
+    if not isinstance(questions, list):
+        st.error("Failed to generate valid trivia questions.")
+        return
+
+    for idx, q in enumerate(questions, 1):
+        try:
+            question_text = q.get("question", f"Missing question {idx}")
+            choices = q.get("choices", [])
+            if not isinstance(choices, list) or len(choices) != 4:
+                raise ValueError("Invalid choices format.")
+            st.write(f"**Q{idx}:** {question_text}")
+            choice = st.radio("Your answer:", choices, key=f"q{idx}")
+            user_answers.append(choice)
+            st.write("---")
+        except Exception as e:
+            st.error(f"Error rendering question {idx}: {e}")
+            user_answers.append(None)
 
     if st.button("Submit Answers"):
+        st.info("[DEBUG] Submit clicked")
         score = 0
         for i, (q, a) in enumerate(zip(questions, user_answers), 1):
             correct = q.get("answer")
             if a == correct:
                 score += 1
-            st.markdown(f"**Q{i} Correct Answer:** {correct}")
-        st.success(f"Your score: {score} / {len(questions)}")
+            st.markdown(f"**Q{i} Answer:** {correct}")
+        st.success(f"You scored {score} / {len(questions)}!")
 
 if __name__ == "__main__":
     main()
