@@ -52,25 +52,32 @@ def extract_json(text):
         return match.group(0)
     return text  # fallback: return original text
 
-def generate_trivia_questions(teams_data, retries=3, wait=10):
+def generate_trivia_questions_once(teams_data):
     prompt = (
         "Create 10 sports trivia questions about NFL teams using the following teams data. "
         "Each question should have 4 multiple-choice options and the correct answer. "
         "Return the output as a JSON array with keys 'question', 'choices', and 'answer'.\n\n"
         f"Teams data: {json.dumps(teams_data, indent=2)}"
     )
+    response = openai.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=1100,
+        temperature=0.7,
+    )
+    questions_json_raw = response.choices[0].message.content
+    questions_json_clean = extract_json(questions_json_raw)
+    return json.loads(questions_json_clean)
 
+@st.cache_data(ttl=86400)
+def get_daily_questions_cached(teams_data):
+    # Cached version calls single API attempt
+    return generate_trivia_questions_once(teams_data)
+
+def generate_trivia_questions_with_retry(teams_data, retries=3, wait=10):
     for attempt in range(retries):
         try:
-            response = openai.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=1100,
-                temperature=0.7,
-            )
-            questions_json_raw = response.choices[0].message.content
-            questions_json_clean = extract_json(questions_json_raw)
-            return json.loads(questions_json_clean)
+            return generate_trivia_questions_once(teams_data)
         except RateLimitError:
             if attempt < retries - 1:
                 st.warning(f"Rate limit reached. Retrying in {wait} seconds...")
@@ -79,15 +86,11 @@ def generate_trivia_questions(teams_data, retries=3, wait=10):
                 st.error("Rate limit exceeded. Please try again later.")
                 return []
         except json.JSONDecodeError as e:
-            st.error(f"JSON decode error: {e}\nRaw response:\n{questions_json_raw}")
+            st.error(f"JSON decode error: {e}")
             return []
         except Exception as e:
             st.error(f"OpenAI error: {e}")
             return []
-
-@st.cache_data(ttl=86400)
-def get_daily_questions(teams_data):
-    return generate_trivia_questions(teams_data)
 
 def main():
     st.title("NFL Trivia Game Powered by API-Football & OpenAI")
@@ -98,7 +101,8 @@ def main():
         return
 
     st.info("Generating trivia questions, please wait...")
-    questions = get_daily_questions(teams_data)
+    # Use retry logic here (not cached)
+    questions = generate_trivia_questions_with_retry(teams_data)
     if not questions:
         st.warning("Failed to generate trivia questions.")
         return
@@ -106,15 +110,15 @@ def main():
     st.write("---")
     st.write("### Today's NFL Trivia Questions:")
 
-    answers = []
+    user_answers = []
     for idx, q in enumerate(questions, start=1):
         st.write(f"**Question {idx}:** {q['question']}")
         choice = st.radio("Select your answer:", q['choices'], key=f"q{idx}")
-        answers.append(choice)
+        user_answers.append(choice)
         st.write("---")
 
     if st.button("Submit All Answers"):
-        score = sum(1 for ans, q in zip(answers, questions) if ans == q['answer'])
+        score = sum(1 for ans, q in zip(user_answers, questions) if ans == q['answer'])
         st.success(f"You scored {score} out of {len(questions)}!")
         for idx, q in enumerate(questions, start=1):
             st.write(f"Question {idx} Correct Answer: **{q['answer']}**")
