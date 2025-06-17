@@ -18,11 +18,15 @@ QUESTIONS_CACHE_FILE = "questions_cache.json"
 
 # Fetch NBA player data from TheSportsDB API (example: Lakers roster)
 def fetch_nba_top_scorers():
-    # 1. Find team ID for Lakers
-    team_search_url = f"https://www.thesportsdb.com/api/v1/json/{THESPORTSDB_API_KEY}/searchteams.php?t=Los Angeles Lakers"
+    team_name = "Los Angeles Lakers"
+    team_search_url = f"https://www.thesportsdb.com/api/v1/json/{THESPORTSDB_API_KEY}/searchteams.php?t={team_name}"
+    
+    st.write("Querying team search URL:", team_search_url)  # Debug line
+    
     team_res = requests.get(team_search_url)
     if team_res.status_code != 200:
         st.error(f"Error searching for team: {team_res.status_code}")
+        st.text(team_res.text)  # Show response
         return None
     try:
         team_data = team_res.json()
@@ -31,8 +35,9 @@ def fetch_nba_top_scorers():
         st.error(f"Could not extract team ID: {e}")
         return None
 
-    # 2. Use team ID to fetch player list
+    # Fetch players
     players_url = f"https://www.thesportsdb.com/api/v1/json/{THESPORTSDB_API_KEY}/lookup_all_players.php?id={team_id}"
+    st.write("Querying players URL:", players_url)  # Debug line
     res = requests.get(players_url)
     if res.status_code != 200:
         st.error(f"Error fetching players: {res.status_code}")
@@ -43,6 +48,7 @@ def fetch_nba_top_scorers():
         st.error(f"JSON decode error: {e}")
         return None
     return data
+
 
 # Generate trivia questions using OpenAI GPT
 def generate_trivia_questions(data_summary):
