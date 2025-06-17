@@ -50,14 +50,15 @@ def generate_trivia_questions(teams_data):
     )
 
     try:
+        st.info("[DEBUG] Sending prompt to OpenAI")
         response = openai.ChatCompletion.create(
             model="gpt-4",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7,
             max_tokens=1500
         )
-        questions_json_raw = response.choices[0].message.content
         st.info("[DEBUG] OpenAI response received")
+        questions_json_raw = response.choices[0].message.content
         questions_json_clean = extract_json(questions_json_raw)
         questions = json.loads(questions_json_clean)
         st.info(f"[DEBUG] Parsed {len(questions)} questions")
@@ -78,17 +79,18 @@ def get_daily_questions(teams_data):
     st.info("[DEBUG] Entered get_daily_questions")
     retries = 3
     for attempt in range(retries):
+        st.info(f"[DEBUG] Attempt {attempt + 1} of {retries}")
         try:
             return generate_trivia_questions(teams_data)
         except RateLimitError:
             wait = 5 + attempt * 5
             st.warning(f"Rate limit hit. Retrying in {wait} seconds...")
             time.sleep(wait)
-        except json.JSONDecodeError:
-            st.error("Failed to parse trivia questions from OpenAI.")
+        except json.JSONDecodeError as jde:
+            st.error(f"[DEBUG] JSONDecodeError on attempt {attempt + 1}: {jde}")
             return []
         except Exception as e:
-            st.error(f"OpenAI API error: {e}")
+            st.error(f"[DEBUG] General Exception on attempt {attempt + 1}: {e}")
             return []
     return []
 
@@ -122,6 +124,7 @@ def main():
 
     for idx, q in enumerate(questions, 1):
         try:
+            st.info(f"[DEBUG] Processing question index {idx}")
             question_text = q.get("question", f"Missing question {idx}")
             choices = q.get("choices", [])
             st.info(f"[DEBUG] Question {idx}: {question_text}")
@@ -138,17 +141,17 @@ def main():
             user_answers.append(None)
 
     if st.button("Submit Answers"):
+        st.info("[DEBUG] Submit button clicked")
         score = 0
-        for q, a in zip(questions, user_answers):
-            correct = q.get("answer")
-            if a == correct:
-                score += 1
-        st.success(f"You scored {score} / {len(questions)}!")
-        for i, q in enumerate(questions, 1):
+        for i, (q, a) in enumerate(zip(questions, user_answers), 1):
             try:
-                st.markdown(f"**Q{i} Answer:** {q['answer']}")
+                correct = q.get("answer")
+                if a == correct:
+                    score += 1
+                st.markdown(f"**Q{i} Answer:** {correct}")
             except Exception as e:
                 st.error(f"Could not show answer for Q{i}: {e}")
+        st.success(f"You scored {score} / {len(questions)}!")
 
 if __name__ == "__main__":
     main()
