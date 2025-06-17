@@ -14,27 +14,35 @@ openai.api_key = OPENAI_API_KEY
 # Fetch NFL teams from API-Football
 @st.cache_data(ttl=86400)
 def fetch_nfl_teams():
+    st.info("[DEBUG] Entered fetch_nfl_teams")
     url = "https://v3.football.api-sports.io/teams?league=1&season=2023"
     headers = {
         "x-apisports-key": API_FOOTBALL_KEY
     }
     response = requests.get(url, headers=headers)
+    st.info(f"[DEBUG] API response status: {response.status_code}")
     if response.status_code != 200:
         raise Exception("Failed to fetch teams data.")
     teams = response.json()["response"]
-    return [team["team"]["name"] for team in teams]
+    team_names = [team["team"]["name"] for team in teams]
+    st.info(f"[DEBUG] Retrieved {len(team_names)} teams")
+    return team_names
 
 # Clean and extract JSON from OpenAI output
 def extract_json(response_text):
+    st.info("[DEBUG] Entered extract_json")
     try:
         start = response_text.index("[")
         end = response_text.rindex("]") + 1
+        st.info("[DEBUG] Successfully extracted JSON from response")
         return response_text[start:end]
     except ValueError:
+        st.error("[DEBUG] Failed to extract JSON from response text")
         return "[]"
 
 # Generate trivia questions using OpenAI
 def generate_trivia_questions(teams_data):
+    st.info("[DEBUG] Entered generate_trivia_questions")
     prompt = (
         "Generate 10 unique NFL trivia questions using only the following team names: "
         f"{', '.join(teams_data)}. Each question should be a dictionary with this structure: "
@@ -49,18 +57,25 @@ def generate_trivia_questions(teams_data):
             max_tokens=1500
         )
         questions_json_raw = response.choices[0].message.content
+        st.info("[DEBUG] OpenAI response received")
         questions_json_clean = extract_json(questions_json_raw)
-        return json.loads(questions_json_clean)
+        questions = json.loads(questions_json_clean)
+        st.info(f"[DEBUG] Parsed {len(questions)} questions")
+        return questions
     except RateLimitError:
+        st.warning("[DEBUG] RateLimitError caught")
         raise
     except json.JSONDecodeError:
+        st.error("[DEBUG] JSONDecodeError caught")
         raise
     except Exception as e:
+        st.error(f"[DEBUG] Exception in generate_trivia_questions: {e}")
         raise
 
 # Retry wrapper
 @st.cache_data(ttl=86400)
 def get_daily_questions(teams_data):
+    st.info("[DEBUG] Entered get_daily_questions")
     retries = 3
     for attempt in range(retries):
         try:
@@ -86,6 +101,7 @@ def main():
     st.info("Fetching NFL teams data from API-Football...")
     try:
         teams_data = fetch_nfl_teams()
+        st.info(f"[DEBUG] Fetched teams: {teams_data}")
     except Exception as e:
         st.error(f"Error fetching NFL teams: {e}")
         return
@@ -108,6 +124,8 @@ def main():
         try:
             question_text = q.get("question", f"Missing question {idx}")
             choices = q.get("choices", [])
+            st.info(f"[DEBUG] Question {idx}: {question_text}")
+            st.info(f"[DEBUG] Choices: {choices}")
             if not isinstance(choices, list) or len(choices) != 4:
                 raise ValueError("Invalid choices format.")
 
