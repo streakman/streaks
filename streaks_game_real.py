@@ -1,38 +1,44 @@
-import os
+import streamlit as st
 import requests
 import json
-import random
-import streamlit as st
-from datetime import date
+import time
+import os
 import openai
 
-# Load API keys from environment variables
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-THESPORTSDB_API_KEY = os.getenv("THESPORTSDB_API_KEY")
+# Load keys from Streamlit secrets or environment variables
+OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
+SPORTSDB_API_KEY = st.secrets.get("SPORTSDB_API_KEY") or os.getenv("SPORTSDB_API_KEY")
+
+if not OPENAI_API_KEY or not SPORTSDB_API_KEY:
+    st.error("Please set your OPENAI_API_KEY and SPORTSDB_API_KEY in Streamlit secrets or environment variables.")
+    st.stop()
 
 openai.api_key = OPENAI_API_KEY
 
-# Constants
-NUM_QUESTIONS = 10
-STATS_FILE = "player_stats.json"
-
-
+# Example fetch function: Get NBA top scorers from TheSportsDB
 def fetch_nba_top_scorers():
-    # Example: fetch NBA top scorers of current season from TheSportsDB
-    # Correct URL format:
-    url = f"https://www.thesportsdb.com/api/v1/json/{THESPORTSDB_API_KEY}/lookup_all_players.php?id=134860"  # NBA Team ID example: Lakers = 134860
-    res = requests.get(url)
-    if res.status_code != 200:
-        st.error(f"Error fetching NBA data: {res.status_code}")
+    url = f"https://www.thesportsdb.com/api/v1/json/{SPORTSDB_API_KEY}/lookuptable.php?l=4387&s=2023-2024"
+    try:
+        res = requests.get(url, timeout=10)
+        res.raise_for_status()
+        data = res.json()
+        # Extract relevant data for prompt, e.g., top 5 scorers
+        scorers = []
+        if "table" in data:
+            for entry in data["table"][:5]:
+                scorers.append({
+                    "name": entry.get("strPlayer"),
+                    "team": entry.get("name_team"),
+                    "goals": entry.get("intGoals"),
+                    "assists": entry.get("intAssists"),
+                })
+        return scorers
+    except Exception as e:
+        st.error(f"Error fetching NBA data: {e}")
         return []
-    data = res.json()
-    players = data.get("player", [])
-    # Filter players with scoring info if available (or just return top 20 random players)
-    return random.sample(players, min(20, len(players))) if players else []
 
-
-def generate_trivia_questions(data_summary):
-    # Prepare prompt for OpenAI with raw data_summary (list of player dicts)
+# Generate trivia questions via OpenAI, with retry & backoff
+def generate_trivia_questions(data_summary, retries=3, wait=10):
     prompt = (
         "Create 10 interesting sports trivia questions with 4 multiple-choice answers each. "
         "Use the following player data from various sports including NBA, NFL, MLB, etc., "
@@ -49,97 +55,62 @@ def generate_trivia_questions(data_summary):
         "  ...\n"
         "]"
     )
-    response = openai.chat.completions.create(
-        model="gpt-3.5-turbo",
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=1100,
-        temperature=0.8,
-    )
-    text = response.choices[0].message.content
-    try:
-        questions = json.loads(text)
-        if isinstance(questions, list):
-            return questions
-    except Exception as e:
-        st.error(f"Failed to parse questions from OpenAI response: {e}")
+
+    for attempt in range(retries):
+        try:
+            response = openai.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=1100,
+                temperature=0.8,
+            )
+            questions_json = response.choices[0].message.content
+            return json.loads(questions_json)
+        except openai.error.RateLimitError:
+            if attempt < retries - 1:
+                st.warning(f"Rate limit hit, retrying in {wait} seconds...")
+                time.sleep(wait)
+            else:
+                st.error("Rate limit exceeded. Please try again later.")
+        except Exception as e:
+            st.error(f"OpenAI error: {e}")
+            break
     return []
 
+# Cache daily questions to avoid multiple OpenAI calls per day
+@st.cache_data(ttl=86400)
+def get_today_questions(data_summary):
+    return generate_trivia_questions(data_summary)
 
-def load_stats():
-    if os.path.exists(STATS_FILE):
-        with open(STATS_FILE, "r") as f:
-            return json.load(f)
-    return {}
-
-
-def save_stats(stats):
-    with open(STATS_FILE, "w") as f:
-        json.dump(stats, f, indent=2)
-
-
+# Main app function
 def main():
-    st.title("Daily Sports Trivia Streaks")
+    st.title("Streaks-Style Sports Trivia Game")
 
-    stats = load_stats()
-    today = str(date.today())
-    user = st.text_input("Enter your name to start playing:", key="user_name").strip()
-    if not user:
-        st.info("Please enter your name to begin.")
-        return
-
-    user_stats = stats.get(user, {})
-    if user_stats.get("last_played") == today:
-        st.write(f"Welcome back, {user}! You have already played today.")
-        st.write(f"Your current streak is: {user_stats.get('streak', 0)}")
-        return
-
-    with st.spinner("Fetching sports data..."):
-        data_summary = fetch_nba_top_scorers()
+    st.write("Fetching latest sports data...")
+    data_summary = fetch_nba_top_scorers()
 
     if not data_summary:
-        st.error("Could not fetch sports data to generate questions. Try again later.")
+        st.warning("No data available to generate questions.")
         return
 
-    with st.spinner("Generating today's questions..."):
-        questions = generate_trivia_questions(data_summary)
+    st.write("Generating questions...")
+    questions = get_today_questions(data_summary)
 
     if not questions:
-        st.error("Failed to generate questions. Please try again later.")
+        st.warning("No questions generated.")
         return
 
-    correct_answers = 0
-
+    # Show questions one by one with timer & choices
     for i, q in enumerate(questions, 1):
-        st.markdown(f"### Question {i}:")
-        st.write(q["question"])
-        choices = q["choices"]
-        user_choice = st.radio("Select your answer:", choices, key=f"q{i}")
+        st.write(f"### Question {i}: {q['question']}")
+        choice = st.radio("Choose an answer:", q['choices'], key=i)
 
-        if st.button("Submit Answer", key=f"submit_{i}"):
-            if user_choice == q["answer"]:
+        if st.button("Submit answer", key=f"submit_{i}"):
+            if choice == q['answer']:
                 st.success("Correct!")
-                correct_answers += 1
             else:
-                st.error(f"Wrong! Correct answer: {q['answer']}")
-
-    st.write(f"Your total correct answers today: {correct_answers} out of {NUM_QUESTIONS}")
-
-    # Update stats
-    streak = user_stats.get("streak", 0)
-    if correct_answers >= 7:  # example threshold for a win streak
-        streak += 1
-        st.balloons()
-    else:
-        streak = 0
-
-    stats[user] = {
-        "last_played": today,
-        "streak": streak,
-        "last_score": correct_answers,
-    }
-    save_stats(stats)
-    st.write(f"Your current winning streak: {streak}")
-
+                st.error(f"Incorrect. The right answer is: {q['answer']}")
+            st.write("---")
 
 if __name__ == "__main__":
     main()
