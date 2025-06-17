@@ -83,6 +83,11 @@ def get_daily_questions(teams_data):
         st.info(f"[DEBUG] Attempt {attempt + 1} of {retries}")
         try:
             questions = generate_trivia_questions(teams_data)
+            if not isinstance(questions, list):
+                raise ValueError("[DEBUG] Returned questions is not a list")
+            for q in questions:
+                if not all(k in q for k in ("question", "choices", "answer")):
+                    raise ValueError("[DEBUG] Invalid question format in list")
             st.info(f"[DEBUG] get_daily_questions returning {len(questions)} questions")
             return questions
         except RateLimitError:
@@ -98,7 +103,6 @@ def get_daily_questions(teams_data):
     return []
 
 # Streamlit app
-
 def main():
     st.title("NFL Trivia Game Powered by API-Football & OpenAI")
     st.write("\nTest your NFL knowledge with AI-generated trivia questions updated daily!")
@@ -112,7 +116,11 @@ def main():
         return
 
     st.info("Generating trivia questions, please wait...")
-    questions = get_daily_questions(teams_data)
+    try:
+        questions = get_daily_questions(teams_data)
+    except Exception as e:
+        st.error(f"[DEBUG] Exception during get_daily_questions: {e}")
+        return
 
     if not questions:
         st.error("No trivia questions available. Try again later.")
