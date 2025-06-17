@@ -17,21 +17,26 @@ openai.api_key = OPENAI_API_KEY
 
 # Example fetch function: Get NBA top scorers from TheSportsDB
 def fetch_nba_top_scorers():
-    url = f"https://www.thesportsdb.com/api/v1/json/{SPORTSDB_API_KEY}/lookuptable.php?l=4387&s=2024"
+    url = f"https://www.thesportsdb.com/api/v1/json/{SPORTSDB_API_KEY}/lookuptable.php?l=4387&s=2023-2024"
     try:
         res = requests.get(url, timeout=10)
         res.raise_for_status()
+        # Debug print to see raw response (remove or comment out after debugging)
+        st.text("Raw API response:")
+        st.text(res.text)
         data = res.json()
-        # Extract relevant data for prompt, e.g., top 5 scorers
+
         scorers = []
         if "table" in data:
             for entry in data["table"][:5]:
                 scorers.append({
-                    "name": entry.get("strPlayer"),
-                    "team": entry.get("name_team"),
-                    "goals": entry.get("intGoals"),
-                    "assists": entry.get("intAssists"),
+                    "name": entry.get("strPlayer", "N/A"),
+                    "team": entry.get("strTeam", "N/A"),
+                    "points": entry.get("intPoints", "N/A"),
+                    "assists": entry.get("intAssists", "N/A"),
                 })
+        else:
+            st.warning("No 'table' key in API response.")
         return scorers
     except Exception as e:
         st.error(f"Error fetching NBA data: {e}")
