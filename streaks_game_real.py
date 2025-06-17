@@ -36,8 +36,8 @@ def extract_json(response_text):
         end = response_text.rindex("]") + 1
         st.info("[DEBUG] Successfully extracted JSON from response")
         return response_text[start:end]
-    except ValueError:
-        st.error("[DEBUG] Failed to extract JSON from response text")
+    except ValueError as ve:
+        st.error(f"[DEBUG] ValueError in extract_json: {ve}")
         return "[]"
 
 # Generate trivia questions using OpenAI
@@ -59,6 +59,7 @@ def generate_trivia_questions(teams_data):
         )
         st.info("[DEBUG] OpenAI response received")
         questions_json_raw = response.choices[0].message.content
+        st.info(f"[DEBUG] Raw response: {questions_json_raw[:200]}...")
         questions_json_clean = extract_json(questions_json_raw)
         questions = json.loads(questions_json_clean)
         st.info(f"[DEBUG] Parsed {len(questions)} questions")
@@ -66,11 +67,11 @@ def generate_trivia_questions(teams_data):
     except RateLimitError:
         st.warning("[DEBUG] RateLimitError caught")
         raise
-    except json.JSONDecodeError:
-        st.error("[DEBUG] JSONDecodeError caught")
+    except json.JSONDecodeError as jde:
+        st.error(f"[DEBUG] JSONDecodeError caught: {jde}")
         raise
     except Exception as e:
-        st.error(f"[DEBUG] Exception in generate_trivia_questions: {e}")
+        st.error(f"[DEBUG] General Exception in generate_trivia_questions: {e}")
         raise
 
 # Retry wrapper
@@ -81,7 +82,9 @@ def get_daily_questions(teams_data):
     for attempt in range(retries):
         st.info(f"[DEBUG] Attempt {attempt + 1} of {retries}")
         try:
-            return generate_trivia_questions(teams_data)
+            questions = generate_trivia_questions(teams_data)
+            st.info(f"[DEBUG] get_daily_questions returning {len(questions)} questions")
+            return questions
         except RateLimitError:
             wait = 5 + attempt * 5
             st.warning(f"Rate limit hit. Retrying in {wait} seconds...")
