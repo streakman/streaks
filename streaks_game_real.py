@@ -1,7 +1,6 @@
 import streamlit as st
 import openai
 import json
-import random
 import time
 from openai.error import RateLimitError
 
@@ -9,117 +8,134 @@ from openai.error import RateLimitError
 OPENAI_API_KEY = st.secrets["openai_api_key"]
 openai.api_key = OPENAI_API_KEY
 
-# Static hockey teams list to avoid API limits
+# Hardcoded NFL teams list to avoid API calls
 @st.cache_data(ttl=86400)
-def fetch_hockey_teams():
-    st.info("[DEBUG] Using static hockey teams data")
+def fetch_nfl_teams():
+    st.info("[DEBUG] Using hardcoded NFL teams list")
     return [
-        "Boston Bruins",
-        "Chicago Blackhawks",
-        "Detroit Red Wings",
-        "Montreal Canadiens",
-        "New York Rangers",
-        "Toronto Maple Leafs"
+        "Arizona Cardinals", "Atlanta Falcons", "Baltimore Ravens",
+        "Buffalo Bills", "Carolina Panthers", "Chicago Bears",
+        "Cincinnati Bengals", "Cleveland Browns", "Dallas Cowboys",
+        "Denver Broncos", "Detroit Lions", "Green Bay Packers",
+        "Houston Texans", "Indianapolis Colts", "Jacksonville Jaguars",
+        "Kansas City Chiefs", "Las Vegas Raiders", "Los Angeles Chargers",
+        "Los Angeles Rams", "Miami Dolphins", "Minnesota Vikings",
+        "New England Patriots", "New Orleans Saints", "New York Giants",
+        "New York Jets", "Philadelphia Eagles", "Pittsburgh Steelers",
+        "San Francisco 49ers", "Seattle Seahawks", "Tampa Bay Buccaneers",
+        "Tennessee Titans", "Washington Commanders"
     ]
 
-# Extract JSON array from OpenAI response
+# Clean and extract JSON from OpenAI output
 def extract_json(response_text):
-    st.info("[DEBUG] Extracting JSON from OpenAI response")
+    st.info("[DEBUG] Entered extract_json")
     try:
         start = response_text.index("[")
         end = response_text.rindex("]") + 1
-        json_str = response_text[start:end]
-        st.info("[DEBUG] Successfully extracted JSON")
-        return json_str
-    except Exception as e:
-        st.error(f"[DEBUG] JSON extraction error: {e}")
+        st.info("[DEBUG] Successfully extracted JSON from response")
+        return response_text[start:end]
+    except ValueError as ve:
+        st.error(f"[DEBUG] ValueError in extract_json: {ve}")
         return "[]"
 
-# Generate trivia questions with OpenAI
+# Generate trivia questions using OpenAI
 def generate_trivia_questions(teams_data):
-    st.info("[DEBUG] Generating trivia questions from OpenAI")
+    st.info("[DEBUG] Entered generate_trivia_questions")
     prompt = (
-        "Generate 3 unique hockey trivia questions using only the following teams: "
-        f"{', '.join(teams_data)}. Each question should be a dictionary with keys: "
-        "'question' (str), 'choices' (list of 4 strings), and 'answer' (one of the choices). "
-        "Output only a JSON array of these questions."
+        "Generate 3 unique NFL trivia questions using only the following team names: "
+        f"{', '.join(teams_data)}. Each question should be a dictionary with this structure: "
+        "{\"question\": ..., \"choices\": [...], \"answer\": ...}. Make sure answers are accurate. "
+        "Return the result as a valid JSON list without any extra text."
     )
+
     try:
+        st.info("[DEBUG] Sending prompt to OpenAI")
         response = openai.ChatCompletion.create(
             model="gpt-4",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7,
-            max_tokens=800,
+            max_tokens=1000
         )
-        raw = response.choices[0].message.content
-        st.info(f"[DEBUG] Raw OpenAI response snippet: {raw[:200]}...")
-        clean_json = extract_json(raw)
-        questions = json.loads(clean_json)
-        st.info(f"[DEBUG] Parsed {len(questions)} questions successfully")
+        st.info("[DEBUG] OpenAI response received")
+        questions_json_raw = response.choices[0].message.content
+        questions_json_clean = extract_json(questions_json_raw)
+        questions = json.loads(questions_json_clean)
+        st.info(f"[DEBUG] Parsed {len(questions)} questions")
         return questions
     except RateLimitError:
-        st.warning("[DEBUG] OpenAI RateLimitError: Please try again later.")
-        return []
-    except json.JSONDecodeError as e:
-        st.error(f"[DEBUG] JSON decoding error: {e}")
+        st.warning("[DEBUG] RateLimitError caught")
+        raise
+    except json.JSONDecodeError as jde:
+        st.error(f"[DEBUG] JSONDecodeError caught: {jde}")
         return []
     except Exception as e:
-        st.error(f"[DEBUG] Unexpected error: {e}")
+        st.error(f"[DEBUG] General Exception in generate_trivia_questions: {e}")
         return []
 
-# Retry wrapper with caching
 @st.cache_data(ttl=86400)
 def get_daily_questions(teams_data):
+    st.info("[DEBUG] Entered get_daily_questions")
     retries = 3
     for attempt in range(retries):
-        st.info(f"[DEBUG] get_daily_questions attempt {attempt + 1}")
-        questions = generate_trivia_questions(teams_data)
-        if questions:
-            return questions
-        else:
-            wait = 3 + attempt * 3
-            st.info(f"[DEBUG] Waiting {wait}s before retry...")
+        st.info(f"[DEBUG] Attempt {attempt + 1} of {retries}")
+        try:
+            questions = generate_trivia_questions(teams_data)
+            if questions:
+                st.info(f"[DEBUG] get_daily_questions returning {len(questions)} questions")
+                return questions
+            else:
+                st.warning("[DEBUG] No questions returned, retrying...")
+        except RateLimitError:
+            wait = 5 + attempt * 5
+            st.warning(f"Rate limit hit. Retrying in {wait} seconds...")
             time.sleep(wait)
+        except Exception as e:
+            st.error(f"[DEBUG] Exception on attempt {attempt + 1}: {e}")
+            return []
     return []
 
 def main():
-    st.title("Hockey Trivia Game Powered by OpenAI")
-    st.write("Test your hockey knowledge with AI-generated trivia questions!")
+    st.title("NFL Trivia Game (Hardcoded Teams, No API)")
+    st.write("Test your NFL knowledge with AI-generated trivia questions!")
 
-    teams = fetch_hockey_teams()
-    st.info(f"[DEBUG] Loaded {len(teams)} hockey teams")
+    teams_data = fetch_nfl_teams()
 
-    st.info("Generating 3 trivia questions, please wait...")
-    questions = get_daily_questions(teams)
+    st.info("Generating trivia questions, please wait...")
+    questions = get_daily_questions(teams_data)
 
     if not questions:
-        st.error("No trivia questions available right now. Please try again later.")
+        st.error("No trivia questions available. Try again later.")
         return
 
+    st.markdown("### Today's NFL Trivia Questions")
     user_answers = []
-    for i, q in enumerate(questions, 1):
+
+    for idx, q in enumerate(questions, 1):
         try:
-            question = q.get("question", f"Missing question {i}")
+            question_text = q.get("question", f"Missing question {idx}")
             choices = q.get("choices", [])
-            if not isinstance(choices, list) or len(choices) != 4:
+            if not isinstance(choices, list) or len(choices) < 2:
                 raise ValueError("Invalid choices format.")
 
-            st.write(f"**Q{i}:** {question}")
-            choice = st.radio(f"Your answer for Q{i}:", choices, key=f"q{i}")
+            st.write(f"**Q{idx}:** {question_text}")
+            choice = st.radio("Your answer:", choices, key=f"q{idx}")
             user_answers.append(choice)
             st.write("---")
         except Exception as e:
-            st.error(f"Error displaying question {i}: {e}")
+            st.error(f"Error rendering question {idx}: {e}")
             user_answers.append(None)
 
     if st.button("Submit Answers"):
         score = 0
         for i, (q, a) in enumerate(zip(questions, user_answers), 1):
-            correct = q.get("answer")
-            if a == correct:
-                score += 1
-            st.markdown(f"**Q{i} answer:** {correct}")
-        st.success(f"Your score: {score} out of {len(questions)}")
+            try:
+                correct = q.get("answer")
+                if a == correct:
+                    score += 1
+                st.markdown(f"**Q{i} Answer:** {correct}")
+            except Exception as e:
+                st.error(f"Could not show answer for Q{i}: {e}")
+        st.success(f"You scored {score} / {len(questions)}!")
 
 if __name__ == "__main__":
     main()
