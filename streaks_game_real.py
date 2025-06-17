@@ -7,7 +7,7 @@ import time
 from openai import OpenAI
 
 # ====== CONFIG =======
-THESPORTSDB_API_KEY = "https://www.thesportsdb.com/api/v1/json/123/"
+THESPORTSDB_API_KEY = https://www.thesportsdb.com/api/v1/json/123/
 OPENAI_API_KEY = "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"
 
 # Initialize OpenAI client
