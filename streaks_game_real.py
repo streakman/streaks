@@ -4,14 +4,14 @@ import json
 import time
 from openai.error import RateLimitError
 
-# Set your OpenAI API key here or in Streamlit secrets
+# Set your OpenAI API key here or via Streamlit secrets
 OPENAI_API_KEY = st.secrets.get("openai_api_key", None)
 if not OPENAI_API_KEY:
     st.error("OpenAI API key not found in secrets!")
     st.stop()
 openai.api_key = OPENAI_API_KEY
 
-# Hardcoded NFL teams (32 teams)
+# Hardcoded NFL teams list (to avoid API-Football rate limits)
 NFL_TEAMS = [
     "Arizona Cardinals", "Atlanta Falcons", "Baltimore Ravens", "Buffalo Bills",
     "Carolina Panthers", "Chicago Bears", "Cincinnati Bengals", "Cleveland Browns",
@@ -66,8 +66,8 @@ def main():
     st.info("[DEBUG] Using hardcoded NFL teams list")
     st.write(f"Using {len(NFL_TEAMS)} NFL teams for trivia generation.")
 
-    st.info(f"Generating 3 trivia questions, please wait...")
-    questions = generate_trivia_questions(NFL_TEAMS, 3)
+    st.info("Generating 3 trivia questions, please wait...")
+    questions = generate_trivia_questions(NFL_TEAMS, num_questions=3)
 
     if not questions:
         st.error("No trivia questions available. Try again later.")
@@ -76,13 +76,17 @@ def main():
     st.markdown("### Today's NFL Trivia Questions")
     user_answers = []
 
+    if not isinstance(questions, list):
+        st.error("Failed to generate valid trivia questions.")
+        return
+
     for idx, q in enumerate(questions, 1):
         try:
             question_text = q.get("question", f"Missing question {idx}")
             choices = q.get("choices", [])
-            if not isinstance(choices, list) or len(choices) < 2:
-                raise ValueError("Invalid choices format.")
-
+            if not isinstance(choices, list) or len(choices) != 4:
+                st.error(f"Invalid choices format for question {idx}.")
+                choices = ["N/A", "N/A", "N/A", "N/A"]
             st.write(f"**Q{idx}:** {question_text}")
             choice = st.radio("Your answer:", choices, key=f"q{idx}")
             user_answers.append(choice)
