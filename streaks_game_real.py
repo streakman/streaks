@@ -1,6 +1,6 @@
 import requests
 
-API_KEY = "1"  # free key to test
+API_KEY = "123"  # free key to test
 
 url = f"https://www.thesportsdb.com/api/v1/json/{API_KEY}/lookuptable.php?l=4387&s=2023-2024"
 
