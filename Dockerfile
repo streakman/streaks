@@ -1,29 +1,28 @@
-# Use official Python 3.11 slim image (this has Python 3.11.13)
-FROM python:3.11-slim
+# Use an official Ubuntu base image
+FROM ubuntu:22.04
 
-# Avoid warnings by setting env vars
-ENV PYTHONUNBUFFERED=1
+# Avoid prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install system dependencies Streamlit needs (including imghdr deps)
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    libjpeg-dev \
-    libpng-dev \
-    libglib2.0-0 \
-    && rm -rf /var/lib/apt/lists/*
+# Update and install dependencies for Python 3.11
+RUN apt-get update && \
+    apt-get install -y software-properties-common && \
+    add-apt-repository ppa:deadsnakes/ppa && \
+    apt-get update && \
+    apt-get install -y python3.11 python3.11-venv python3.11-dev python3-pip && \
+    update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1 && \
+    python -m pip install --upgrade pip && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user "vscode"
-RUN useradd -ms /bin/bash vscode
-
-USER vscode
+# Set working directory
 WORKDIR /workspace
 
-# Upgrade pip (will be run again in postCreateCommand, but harmless here)
-RUN python3 -m pip install --upgrade pip
+# Copy your source code (optional here)
+# COPY . .
 
-# Copy requirements so devcontainer.json can run pip install on them
-COPY --chown=vscode:vscode requirements.txt /workspace/
+# Install requirements
+COPY requirements.txt .
+RUN python -m pip install -r requirements.txt
 
-# Default command
+# Default command (can be overridden in devcontainer.json)
 CMD ["bash"]
