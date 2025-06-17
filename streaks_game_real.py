@@ -5,123 +5,98 @@ import time
 import os
 import openai
 
-# Load keys from Streamlit secrets or environment variables
+# Load keys
 OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
-SPORTSDB_API_KEY = st.secrets.get("SPORTSDB_API_KEY") or os.getenv("SPORTSDB_API_KEY")
+API_SPORTS_API_KEY = st.secrets.get("API_SPORTS_API_KEY") or os.getenv("API_SPORTS_API_KEY")
 
-if not OPENAI_API_KEY or not SPORTSDB_API_KEY:
-    st.error("Please set your OPENAI_API_KEY and SPORTSDB_API_KEY in Streamlit secrets or environment variables.")
+if not OPENAI_API_KEY or not API_SPORTS_API_KEY:
+    st.error("Please set your OPENAI_API_KEY and API_SPORTS_API_KEY in Streamlit secrets or environment variables.")
     st.stop()
 
 openai.api_key = OPENAI_API_KEY
 
-def fetch_nba_standings():
-    """
-    Fetch NBA standings (Eastern Conference) from TheSportsDB API.
-    """
-    # TheSportsDB API endpoint for NBA standings, Eastern conference 2023 season
-    url = f"https://www.thesportsdb.com/api/v1/json/{SPORTSDB_API_KEY}/lookuptable.php?l=4387&s=2023-2024"
-    
+# API-SPORTS NBA teams endpoint
+def fetch_nba_teams():
+    url = "https://api-basketball.p.rapidapi.com/teams"
+    headers = {
+        "X-RapidAPI-Key": API_SPORTS_API_KEY,
+        "X-RapidAPI-Host": "api-basketball.p.rapidapi.com"
+    }
+    params = {
+        "league": "12",  # NBA league ID in API-SPORTS
+        "season": "2023"
+    }
     try:
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        
-        if "table" not in data or not data["table"]:
-            st.warning("No NBA standings data found in the response.")
-            return []
-        
-        # Extract top 10 teams with key stats
-        standings = []
-        for entry in data["table"][:10]:
-            standings.append({
-                "team": entry.get("name"),
-                "position": entry.get("intRank"),
-                "played": entry.get("intPlayed"),
-                "win": entry.get("intWin"),
-                "loss": entry.get("intLoss"),
-                "points": entry.get("intPoints")
-            })
-        return standings
-    
-    except requests.exceptions.HTTPError as e:
-        st.error(f"HTTP error fetching NBA standings: {e}")
-    except requests.exceptions.RequestException as e:
-        st.error(f"Network error fetching NBA standings: {e}")
-    except json.JSONDecodeError:
-        st.error("Error parsing NBA standings JSON data.")
-    return []
+        res = requests.get(url, headers=headers, params=params, timeout=10)
+        res.raise_for_status()
+        data = res.json()
+        # data['response'] contains list of teams
+        teams = data.get("response", [])
+        return teams
+    except Exception as e:
+        st.error(f"Error fetching NBA teams from API-SPORTS: {e}")
+        return []
 
-def generate_trivia_questions(data_summary, retries=3, wait=10):
-    """
-    Generate 10 sports trivia questions with OpenAI GPT-4o-mini,
-    using the fetched NBA standings data as context.
-    """
+def generate_trivia_questions(teams_data, retries=3, wait=10):
     prompt = (
-        "Generate 10 interesting and diverse NBA trivia questions based on these team standings, "
-        "with 4 multiple-choice answers each. Format the output as a JSON list, where each entry has "
-        "'question' (string), 'choices' (list of 4 strings), and 'answer' (correct choice string).\n\n"
-        f"NBA Standings Data:\n{json.dumps(data_summary, indent=2)}\n\n"
-        "Make sure questions are engaging and test knowledge about team performance, wins, losses, and points."
+        "Create 10 interesting NBA multiple-choice trivia questions using the following team data:\n"
+        f"{json.dumps(teams_data, indent=2)}\n"
+        "Return a JSON list of questions, each with 'question', 'choices' (4 options), and 'answer'."
     )
-    
     for attempt in range(retries):
         try:
             response = openai.chat.completions.create(
-                model="gpt-4o-mini",
+                model="gpt-3.5-turbo",
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=1100,
                 temperature=0.7,
             )
-            questions_text = response.choices[0].message.content
-            return json.loads(questions_text)
+            questions_json = response.choices[0].message.content
+            return json.loads(questions_json)
         except openai.error.RateLimitError:
             if attempt < retries - 1:
-                st.warning(f"Rate limit hit, retrying in {wait} seconds...")
+                st.warning(f"Rate limit hit. Retrying in {wait} seconds...")
                 time.sleep(wait)
             else:
-                st.error("OpenAI API rate limit exceeded. Try again later.")
-                return []
-        except json.JSONDecodeError:
-            st.error("Failed to parse questions JSON from OpenAI response.")
-            return []
+                st.error("Rate limit exceeded. Please try again later.")
         except Exception as e:
-            st.error(f"OpenAI API error: {e}")
-            return []
+            st.error(f"OpenAI error: {e}")
+            break
     return []
 
 @st.cache_data(ttl=86400)
-def get_daily_questions(data_summary):
-    return generate_trivia_questions(data_summary)
+def get_daily_questions(teams_data):
+    return generate_trivia_questions(teams_data)
 
 def main():
-    st.title("🏀 NBA Standings Trivia Game")
+    st.title("NBA Trivia with API-SPORTS & OpenAI")
 
-    st.info("Fetching NBA standings data...")
-    data_summary = fetch_nba_standings()
+    st.info("Fetching NBA teams data...")
+    teams = fetch_nba_teams()
 
-    if not data_summary:
-        st.warning("No NBA standings data available, cannot generate questions.")
+    if not teams:
+        st.warning("No NBA teams data available.")
         return
 
-    st.info("Generating trivia questions (may take a few seconds)...")
-    questions = get_daily_questions(data_summary)
+    st.info("Generating trivia questions (this may take a few seconds)...")
+    questions = get_daily_questions(teams)
 
     if not questions:
-        st.warning("Failed to generate trivia questions.")
+        st.warning("No questions generated.")
         return
 
     st.write("---")
-    st.header("Today's NBA Trivia Questions")
+    st.write("### Today's NBA Trivia Questions:")
 
-    for i, q in enumerate(questions, start=1):
-        st.write(f"**Q{i}: {q['question']}**")
-        choice = st.radio("Your answer:", q["choices"], key=f"q{i}")
-        if st.button("Submit Answer", key=f"submit_{i}"):
+    for idx, q in enumerate(questions, start=1):
+        st.write(f"**Question {idx}:** {q['question']}")
+        choice = st.radio("Select your answer:", q['choices'], key=f"q{idx}")
+
+        if st.button("Submit Answer", key=f"submit_{idx}"):
             if choice == q["answer"]:
                 st.success("Correct! 🎉")
             else:
-                st.error(f"Wrong! The correct answer is: {q['answer']}")
+                st.error(f"Wrong. The correct answer is: {q['answer']}")
         st.write("---")
 
 if __name__ == "__main__":
