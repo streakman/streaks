@@ -3,11 +3,11 @@ import openai
 import json
 from openai.error import RateLimitError
 
-# Get OpenAI API key from Streamlit secrets or env
-OPENAI_API_KEY = st.secrets.get("openai_api_key", None)
+OPENAI_API_KEY = st.secrets.get("openai_api_key")
 if not OPENAI_API_KEY:
     st.error("OpenAI API key not found in secrets!")
     st.stop()
+
 openai.api_key = OPENAI_API_KEY
 
 NFL_TEAMS = [
@@ -35,7 +35,6 @@ def generate_trivia_questions(teams, num=3):
         f"{', '.join(teams)}. Each question should be a dictionary with this structure: "
         '{"question": ..., "choices": [...], "answer": ...}. Make sure answers are accurate.'
     )
-
     try:
         response = openai.chat.completions.create(
             model="gpt-4",
