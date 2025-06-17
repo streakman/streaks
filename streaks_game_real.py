@@ -4,23 +4,19 @@ import json
 import time
 import os
 import openai
-import requests
-
-url = "https://www.thesportsdb.com/api/v2/json/all/leagues"
-api_key = st.secrets.get("SPORTSDB_API_KEY") or os.getenv("SPORTSDB_API_KEY")
-
-headers = {
-    "X-API-KEY": f"{api_key}",
-    "Content-Type": "application/json"
-}
 
 # Load keys from Streamlit secrets or environment variables
+SPORTSDB_API_KEY = st.secrets.get("SPORTSDB_API_KEY") or os.getenv("SPORTSDB_API_KEY")
 OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
+
 if not OPENAI_API_KEY or not SPORTSDB_API_KEY:
     st.error("Please set your OPENAI_API_KEY and SPORTSDB_API_KEY in Streamlit secrets or environment variables.")
     st.stop()
 
 openai.api_key = OPENAI_API_KEY
+
+# Correct API endpoint for NBA standings 2023-2024 season (league ID 4387)
+NBA_STANDINGS_URL = f"https://www.thesportsdb.com/api/v1/json/{SPORTSDB_API_KEY}/lookuptable.php?l=4387&s=2023-2024"
 
 def fetch_nba_standings():
     """
@@ -28,7 +24,7 @@ def fetch_nba_standings():
     Returns a list of dicts with team and standings info.
     """
     try:
-        res = requests.get(url, timeout=10)
+        res = requests.get(NBA_STANDINGS_URL, timeout=10)
         res.raise_for_status()
 
         if not res.text:
@@ -73,7 +69,7 @@ def generate_trivia_questions(data_summary, retries=3, wait=10):
 
     for attempt in range(retries):
         try:
-            response = openai.chat.completions.create(
+            response = openai.ChatCompletion.create(
                 model="gpt-4o-mini",
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=1100,
