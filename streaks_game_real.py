@@ -17,7 +17,7 @@ openai.api_key = OPENAI_API_KEY
 
 # Example fetch function: Get NBA top scorers from TheSportsDB
 def fetch_nba_top_scorers():
-    url = f"https://www.thesportsdb.com/api/v1/json/{SPORTSDB_API_KEY}/lookuptable.php?l=4387&s=2023-2024"
+    url = f"https://www.thesportsdb.com/api/v1/json/{SPORTSDB_API_KEY}/lookuptable.php?l=4387&s=2024"
     try:
         res = requests.get(url, timeout=10)
         res.raise_for_status()
