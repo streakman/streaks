@@ -1,150 +1,131 @@
 import streamlit as st
 import requests
-import json
+import openai
 import datetime
-import os
+import random
+import json
 import time
-from openai import OpenAI
 
-# ====== CONFIG =======
-THESPORTSDB_API_KEY = https://www.thesportsdb.com/api/v1/json/123/
-OPENAI_API_KEY = "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"
+# === Configuration ===
+THESPORTSDB_API_KEY = "123/"  # <-- Replace with your actual key
+OPENAI_API_KEY = "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"   # <-- Replace with your actual OpenAI key
+THESPORTSDB_BASE_URL = f"https://www.thesportsdb.com/api/v1/json/{THESPORTSDB_API_KEY}"
+openai.api_key = OPENAI_API_KEY
 
-# Initialize OpenAI client
-client = OpenAI(api_key=OPENAI_API_KEY)
-
-# Local cache filename for daily questions
-QUESTIONS_CACHE_FILE = "questions_cache.json"
-
-# Fetch NBA player data from TheSportsDB API (example: Lakers roster)
-def fetch_nba_top_scorers():
-    team_name = "Los Angeles Lakers"
-    team_search_url = f"https://www.thesportsdb.com/api/v1/json/{THESPORTSDB_API_KEY}/searchteams.php?t={team_name}"
-    
-    st.write("Querying team search URL:", team_search_url)  # Debug line
-    
-    team_res = requests.get(team_search_url)
-    if team_res.status_code != 200:
-        st.error(f"Error searching for team: {team_res.status_code}")
-        st.text(team_res.text)  # Show response
-        return None
-    try:
-        team_data = team_res.json()
-        team_id = team_data["teams"][0]["idTeam"]
-    except Exception as e:
-        st.error(f"Could not extract team ID: {e}")
-        return None
-
-    # Fetch players
-    players_url = f"https://www.thesportsdb.com/api/v1/json/{THESPORTSDB_API_KEY}/lookup_all_players.php?id={team_id}"
-    st.write("Querying players URL:", players_url)  # Debug line
-    res = requests.get(players_url)
+# === Helper Functions ===
+def fetch_random_team_id():
+    leagues = ["NBA", "NFL", "NHL", "MLB"]
+    league = random.choice(leagues)
+    url = f"{THESPORTSDB_BASE_URL}/search_all_teams.php?l={league}"
+    res = requests.get(url)
     if res.status_code != 200:
-        st.error(f"Error fetching players: {res.status_code}")
+        st.error("Error fetching teams from TheSportsDB")
         return None
     try:
-        data = res.json()
+        teams = res.json()["teams"]
+        team = random.choice(teams)
+        return team["idTeam"], team["strTeam"]
     except Exception as e:
-        st.error(f"JSON decode error: {e}")
+        st.error(f"Failed to extract team data: {e}")
         return None
-    return data
 
+def fetch_team_players(team_id):
+    url = f"{THESPORTSDB_BASE_URL}/lookup_all_players.php?id={team_id}"
+    res = requests.get(url)
+    if res.status_code != 200:
+        st.error("Error fetching players from TheSportsDB")
+        return None
+    try:
+        return res.json()["player"]
+    except Exception as e:
+        st.error(f"Failed to extract player data: {e}")
+        return None
 
-# Generate trivia questions using OpenAI GPT
-def generate_trivia_questions(data_summary):
-    messages = [
-        {"role": "system", "content": "You are a creative sports trivia question generator."},
-        {"role": "user", "content": f"Using this NBA player data summary: {data_summary}, generate 10 unique sports trivia questions across multiple sports with 4 multiple-choice options each. Format each question like this:\n\n1. Question text?\nA) option 1\nB) option 2\nC) option 3\nD) option 4\n\nOnly output the questions and options, no explanations."}
-    ]
-
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=messages,
-        max_tokens=1100,
+def generate_trivia_questions(summary_data):
+    prompt = f"""
+    You are a sports trivia AI. Based on the following data:
+    {summary_data}
+    Generate 10 multiple-choice sports trivia questions about teams, players, or historical stats across sports. Each question must have 4 answer choices and one correct answer clearly marked.
+    Respond in JSON format:
+    [{{"question": ..., "choices": [..], "correct_answer": ...}}, ...]
+    """
+    response = openai.ChatCompletion.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=1100
     )
-    questions_text = response.choices[0].message.content
-    return questions_text
+    try:
+        questions = json.loads(response["choices"][0]["message"]["content"])
+        return questions
+    except Exception as e:
+        st.error(f"Error parsing GPT response: {e}")
+        return []
 
-# Save questions to cache with date key
-def save_questions_cache(date_str, questions_text):
-    cache = {}
-    if os.path.exists(QUESTIONS_CACHE_FILE):
-        with open(QUESTIONS_CACHE_FILE, "r") as f:
-            cache = json.load(f)
-    cache[date_str] = questions_text
-    with open(QUESTIONS_CACHE_FILE, "w") as f:
-        json.dump(cache, f)
+def get_today_questions():
+    today = datetime.date.today().isoformat()
+    filename = f"questions_{today}.json"
+    try:
+        with open(filename, "r") as f:
+            return json.load(f)
+    except:
+        # Generate new questions
+        team_id, team_name = fetch_random_team_id()
+        players = fetch_team_players(team_id)
+        data_summary = json.dumps(players)
+        questions = generate_trivia_questions(data_summary)
+        with open(filename, "w") as f:
+            json.dump(questions, f)
+        return questions
 
-# Load questions from cache if exists for today
-def load_questions_cache(date_str):
-    if not os.path.exists(QUESTIONS_CACHE_FILE):
-        return None
-    with open(QUESTIONS_CACHE_FILE, "r") as f:
-        cache = json.load(f)
-    return cache.get(date_str, None)
+def update_user_stats(username, correct_count):
+    today = datetime.date.today().isoformat()
+    stats_file = f"stats_{today}.json"
+    try:
+        with open(stats_file, "r") as f:
+            stats = json.load(f)
+    except:
+        stats = {}
+    if username not in stats:
+        stats[username] = {"score": 0}
+    stats[username]["score"] += correct_count
+    with open(stats_file, "w") as f:
+        json.dump(stats, f)
 
-# Parse questions text into structured list
-def parse_questions(questions_text):
-    # Simple parser splitting by lines, this can be improved
-    questions = []
-    lines = questions_text.strip().split("\n")
-    q = {}
-    for line in lines:
-        if line.strip() == "":
-            continue
-        if line[0].isdigit() and line[1] == ".":
-            if q:
-                questions.append(q)
-            q = {"question": line[3:].strip(), "options": []}
-        elif line[0] in ["A", "B", "C", "D"] and line[1] == ")":
-            q["options"].append(line[3:].strip())
-    if q:
-        questions.append(q)
-    return questions
+# === Streamlit UI ===
+st.title("🏆 Daily Sports Streaks Game")
 
-# Streamlit countdown timer for each question
-def countdown_timer(seconds):
-    placeholder = st.empty()
-    for i in range(seconds, 0, -1):
-        placeholder.markdown(f"⏳ Time left: **{i}** seconds")
-        time.sleep(1)
-    placeholder.markdown("Time's up! ⏰")
+username = st.text_input("Enter your name to begin:")
+if username:
+    questions = get_today_questions()
+    correct = 0
 
-# Main app
-def main():
-    st.title("Sports Trivia Game")
+    for i, q in enumerate(questions):
+        st.markdown(f"### Question {i + 1}: {q['question']}")
 
-    today_str = datetime.date.today().isoformat()
-    questions_text = load_questions_cache(today_str)
+        # Countdown timer
+        count = st.empty()
+        for sec in range(10, 0, -1):
+            count.markdown(f"⏱️ Time left: {sec}s")
+            time.sleep(1)
+        count.markdown("⏱️ Time's up!")
 
-    if questions_text is None:
-        st.info("Fetching latest sports data and generating questions...")
-        data = fetch_nba_top_scorers()
-        if data is None:
-            st.stop()
-        # Summarize the data for prompt (basic example, customize as needed)
-        player_names = [p["strPlayer"] for p in data.get("player", []) if "strPlayer" in p]
-        data_summary = f"Players: {', '.join(player_names[:10])} and their stats."
-        questions_text = generate_trivia_questions(data_summary)
-        save_questions_cache(today_str, questions_text)
-    else:
-        st.success("Loaded today's questions from cache.")
+        choice = st.radio("Choose an answer:", q['choices'], key=f"q{i}")
+        if st.button(f"Submit Answer {i + 1}", key=f"submit_{i}"):
+            if choice == q['correct_answer']:
+                st.success("✅ Correct!")
+                correct += 1
+            else:
+                st.error(f"❌ Wrong. Correct answer was: {q['correct_answer']}")
 
-    questions = parse_questions(questions_text)
+    st.markdown(f"## ✅ You got {correct} out of {len(questions)} correct!")
+    update_user_stats(username, correct)
 
-    score = 0
-    total = len(questions)
-
-    for idx, q in enumerate(questions):
-        st.markdown(f"### Q{idx+1}: {q['question']}")
-        options = q["options"]
-        # Multiple choice radio buttons
-        choice = st.radio("Select your answer:", options, key=f"q{idx}")
-        countdown_timer(15)  # 15 seconds countdown per question
-        # TODO: Add logic to check correctness once correct answers are available
-        st.markdown("---")
-
-    st.write(f"Your final score: {score} / {total}")
-
-if __name__ == "__main__":
-    main()
+    st.markdown("### 📊 Leaderboard (Today)")
+    try:
+        with open(f"stats_{datetime.date.today().isoformat()}.json", "r") as f:
+            stats = json.load(f)
+        sorted_stats = sorted(stats.items(), key=lambda x: -x[1]['score'])
+        for rank, (user, data) in enumerate(sorted_stats, 1):
+            st.write(f"{rank}. {user} - {data['score']} points")
+    except:
+        st.info("No stats yet for today.")
