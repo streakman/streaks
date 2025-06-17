@@ -1,0 +1,28 @@
+# === Environment & Secrets ===
+.env
+
+# === Python ===
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# === Mac OS ===
+.DS_Store
+
+# === VSCode ===
+.vscode/
+
+# === Streamlit Cache ===
+.streamlit/
+
+# === Logs ===
+*.log
+
+# === Jupyter Notebooks (optional) ===
+.ipynb_checkpoints/
+
+# === Build files ===
+build/
+dist/
+*.egg-info/
