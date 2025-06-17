@@ -1,3 +1,3 @@
-openai
-streamlit
+openai>=0.27.0
+streamlit>=1.18
 sportsipy
