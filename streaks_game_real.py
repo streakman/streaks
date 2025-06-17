@@ -15,43 +15,47 @@ if not API_FOOTBALL_KEY or not OPENAI_API_KEY:
 
 openai.api_key = OPENAI_API_KEY
 
-HEADERS = {
-    "x-apisports-key": API_FOOTBALL_KEY
-}
-
-# Fetch NFL teams for the 2023 season
-def fetch_nfl_teams():
-    url = "https://v1.americanfootball.api-sports.io/teams?season=2023"
+# Fetch NFL teams from API-Football
+def fetch_nfl_teams(season=2023):
+    url = "https://v3.api-football.com/americanfootball/teams"
+    headers = {"x-apisports-key": API_FOOTBALL_KEY}
+    params = {"season": season}
     try:
-        response = requests.get(url, headers=HEADERS, timeout=10)
+        response = requests.get(url, headers=headers, params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
-        teams = data.get("response", [])
-        # Extract team names and cities
-        simplified_teams = [{
-            "name": team["team"]["name"],
-            "city": team["team"]["city"],
-            "conference": team["team"].get("conference", "N/A"),
-            "division": team["team"].get("division", "N/A"),
-        } for team in teams]
-        return simplified_teams
+        # You may want to explore the full structure of data and adjust accordingly:
+        if "response" in data:
+            teams = data["response"]
+            simplified = []
+            for team_info in teams:
+                team = team_info.get("team", {})
+                simplified.append({
+                    "id": team.get("id"),
+                    "name": team.get("name"),
+                    "city": team.get("city"),
+                    "logo": team.get("logo"),
+                })
+            return simplified
+        else:
+            st.error("Unexpected data format from API-Football.")
+            return []
     except Exception as e:
         st.error(f"Error fetching NFL teams from API-Football: {e}")
         return []
 
-# Generate trivia questions using OpenAI
-def generate_trivia_questions(data_summary, retries=3, wait=10):
+# Generate trivia questions using OpenAI GPT
+def generate_trivia_questions(teams_data, retries=3, wait=10):
     prompt = (
-        "Create 10 interesting NFL trivia questions with 4 multiple-choice answers each. "
-        "Use the following NFL teams data to create questions about teams, cities, conferences, or divisions:\n"
-        f"{json.dumps(data_summary, indent=2)}\n"
-        "Return the questions in JSON format as a list. Each item should have 'question', 'choices' (list of 4 strings), and 'answer' (correct choice string)."
+        "Generate 10 multiple-choice sports trivia questions based on the following NFL teams data. "
+        "Format as a JSON list of questions with 'question', 'choices' (4 options), and 'answer' (correct choice).\n\n"
+        f"{json.dumps(teams_data, indent=2)}"
     )
 
     for attempt in range(retries):
         try:
             response = openai.chat.completions.create(
-                model="gpt-3.5-turbo",
+                model="gpt-4o-mini",
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=1100,
                 temperature=0.7,
@@ -60,34 +64,35 @@ def generate_trivia_questions(data_summary, retries=3, wait=10):
             return json.loads(questions_json)
         except openai.error.RateLimitError:
             if attempt < retries - 1:
-                st.warning(f"Rate limit reached. Retrying in {wait} seconds...")
+                st.warning(f"Rate limit hit. Retrying in {wait} seconds...")
                 time.sleep(wait)
             else:
                 st.error("Rate limit exceeded. Please try again later.")
                 return []
-        except json.JSONDecodeError:
-            st.error("Failed to decode JSON from OpenAI response. Response was:\n" + questions_json)
-            return []
         except Exception as e:
             st.error(f"OpenAI error: {e}")
             return []
 
 @st.cache_data(ttl=86400)
-def get_daily_questions(data_summary):
-    return generate_trivia_questions(data_summary)
+def get_daily_questions(teams_data):
+    return generate_trivia_questions(teams_data)
 
 def main():
-    st.title("NFL Trivia Game - Powered by API-Football & OpenAI")
+    st.title("NFL Trivia with API-Football & OpenAI")
 
     st.info("Fetching NFL teams data...")
-    nfl_teams = fetch_nfl_teams()
+    teams = fetch_nfl_teams()
 
-    if not nfl_teams:
-        st.warning("No NFL teams data available. Cannot generate trivia.")
+    if not teams:
+        st.warning("No NFL teams data available, cannot generate trivia.")
         return
 
-    st.info("Generating trivia questions (this may take a few seconds)...")
-    questions = get_daily_questions(nfl_teams)
+    st.write("### NFL Teams Retrieved:")
+    for team in teams:
+        st.write(f"- {team['name']} ({team['city']})")
+
+    st.info("Generating trivia questions...")
+    questions = get_daily_questions(teams)
 
     if not questions:
         st.warning("No trivia questions generated.")
@@ -95,11 +100,9 @@ def main():
 
     st.write("---")
     st.write("### Today's NFL Trivia Questions:")
-
     for idx, q in enumerate(questions, start=1):
         st.write(f"**Question {idx}:** {q['question']}")
         choice = st.radio("Select your answer:", q['choices'], key=f"q{idx}")
-
         if st.button("Submit Answer", key=f"submit_{idx}"):
             if choice == q["answer"]:
                 st.success("Correct! 🎉")
