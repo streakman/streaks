@@ -53,12 +53,10 @@ def generate_trivia_questions(teams_data):
         return json.loads(questions_json_clean)
     except RateLimitError:
         raise
-    except json.JSONDecodeError as e:
-        st.error("Failed to parse trivia questions from OpenAI.")
-        return []
+    except json.JSONDecodeError:
+        raise
     except Exception as e:
-        st.error(f"OpenAI API error: {e}")
-        return []
+        raise
 
 # Retry wrapper
 @st.cache_data(ttl=86400)
@@ -71,8 +69,11 @@ def get_daily_questions(teams_data):
             wait = 5 + attempt * 5
             st.warning(f"Rate limit hit. Retrying in {wait} seconds...")
             time.sleep(wait)
+        except json.JSONDecodeError:
+            st.error("Failed to parse trivia questions from OpenAI.")
+            return []
         except Exception as e:
-            st.error(f"Unexpected error: {e}")
+            st.error(f"OpenAI API error: {e}")
             return []
     return []
 
