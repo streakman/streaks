@@ -4,7 +4,8 @@ import json
 import time
 import openai
 import os
-from openai.error import RateLimitError  # <-- Import RateLimitError correctly
+import re
+from openai.error import RateLimitError
 
 # Load API keys from secrets or environment variables
 API_FOOTBALL_KEY = st.secrets.get("API_FOOTBALL_KEY") or os.getenv("API_FOOTBALL_KEY")
@@ -44,6 +45,13 @@ def fetch_nfl_teams():
         st.error(f"Error fetching NFL teams: {e}")
         return []
 
+def extract_json(text):
+    """Extract the first JSON array from text."""
+    match = re.search(r"\[.*\]", text, re.DOTALL)
+    if match:
+        return match.group(0)
+    return text  # fallback: return original text
+
 def generate_trivia_questions(teams_data, retries=3, wait=10):
     prompt = (
         "Create 10 sports trivia questions about NFL teams using the following teams data. "
@@ -60,8 +68,9 @@ def generate_trivia_questions(teams_data, retries=3, wait=10):
                 max_tokens=1100,
                 temperature=0.7,
             )
-            questions_json = response.choices[0].message.content
-            return json.loads(questions_json)
+            questions_json_raw = response.choices[0].message.content
+            questions_json_clean = extract_json(questions_json_raw)
+            return json.loads(questions_json_clean)
         except RateLimitError:
             if attempt < retries - 1:
                 st.warning(f"Rate limit reached. Retrying in {wait} seconds...")
@@ -69,6 +78,9 @@ def generate_trivia_questions(teams_data, retries=3, wait=10):
             else:
                 st.error("Rate limit exceeded. Please try again later.")
                 return []
+        except json.JSONDecodeError as e:
+            st.error(f"JSON decode error: {e}\nRaw response:\n{questions_json_raw}")
+            return []
         except Exception as e:
             st.error(f"OpenAI error: {e}")
             return []
