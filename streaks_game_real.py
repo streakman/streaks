@@ -19,6 +19,8 @@ def fetch_nfl_teams():
         "x-apisports-key": API_FOOTBALL_KEY
     }
     response = requests.get(url, headers=headers)
+    if response.status_code != 200:
+        raise Exception("Failed to fetch teams data.")
     teams = response.json()["response"]
     return [team["team"]["name"] for team in teams]
 
@@ -44,7 +46,7 @@ def generate_trivia_questions(teams_data):
             model="gpt-4",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7,
-            max_tokens=1000
+            max_tokens=1500
         )
         questions_json_raw = response.choices[0].message.content
         questions_json_clean = extract_json(questions_json_raw)
@@ -53,6 +55,9 @@ def generate_trivia_questions(teams_data):
         raise
     except json.JSONDecodeError as e:
         st.error("Failed to parse trivia questions from OpenAI.")
+        return []
+    except Exception as e:
+        st.error(f"OpenAI API error: {e}")
         return []
 
 # Retry wrapper
@@ -78,10 +83,18 @@ def main():
     st.write("\nTest your NFL knowledge with AI-generated trivia questions updated daily!")
 
     st.info("Fetching NFL teams data from API-Football...")
-    teams_data = fetch_nfl_teams()
+    try:
+        teams_data = fetch_nfl_teams()
+    except Exception as e:
+        st.error(f"Error fetching NFL teams: {e}")
+        return
 
     st.info("Generating trivia questions, please wait...")
     questions = get_daily_questions(teams_data)
+
+    if not questions:
+        st.error("No trivia questions available. Try again later.")
+        return
 
     st.markdown("### Today's NFL Trivia Questions")
     user_answers = []
@@ -106,10 +119,17 @@ def main():
             user_answers.append(None)
 
     if st.button("Submit Answers"):
-        score = sum(1 for q, a in zip(questions, user_answers) if a == q['answer'])
+        score = 0
+        for q, a in zip(questions, user_answers):
+            correct = q.get("answer")
+            if a == correct:
+                score += 1
         st.success(f"You scored {score} / {len(questions)}!")
         for i, q in enumerate(questions, 1):
-            st.markdown(f"**Q{i} Answer:** {q['answer']}")
+            try:
+                st.markdown(f"**Q{i} Answer:** {q['answer']}")
+            except Exception as e:
+                st.error(f"Could not show answer for Q{i}: {e}")
 
 if __name__ == "__main__":
     main()
