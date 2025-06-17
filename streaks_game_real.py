@@ -4,11 +4,18 @@ import json
 import time
 import os
 import openai
+import requests
+
+url = "https://www.thesportsdb.com/api/v2/json/all/leagues"
+api_key = st.secrets.get("SPORTSDB_API_KEY") or os.getenv("SPORTSDB_API_KEY")
+
+headers = {
+    "X-API-KEY": f"{api_key}",
+    "Content-Type": "application/json"
+}
 
 # Load keys from Streamlit secrets or environment variables
 OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
-SPORTSDB_API_KEY = st.secrets.get("SPORTSDB_API_KEY") or os.getenv("SPORTSDB_API_KEY")
-
 if not OPENAI_API_KEY or not SPORTSDB_API_KEY:
     st.error("Please set your OPENAI_API_KEY and SPORTSDB_API_KEY in Streamlit secrets or environment variables.")
     st.stop()
@@ -20,7 +27,6 @@ def fetch_nba_standings():
     Fetch NBA standings (top teams) from TheSportsDB for the 2023-2024 season.
     Returns a list of dicts with team and standings info.
     """
-    url = f"https://www.thesportsdb.com/api/v1/json/{SPORTSDB_API_KEY}/lookuptable.php?l=4387&s=2023-2024"
     try:
         res = requests.get(url, timeout=10)
         res.raise_for_status()
