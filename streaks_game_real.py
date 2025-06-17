@@ -4,6 +4,7 @@ import json
 import time
 import openai
 import os
+from openai.error import RateLimitError  # <-- Import RateLimitError correctly
 
 # Load API keys from secrets or environment variables
 API_FOOTBALL_KEY = st.secrets.get("API_FOOTBALL_KEY") or os.getenv("API_FOOTBALL_KEY")
@@ -61,7 +62,7 @@ def generate_trivia_questions(teams_data, retries=3, wait=10):
             )
             questions_json = response.choices[0].message.content
             return json.loads(questions_json)
-        except openai.error.RateLimitError:
+        except RateLimitError:
             if attempt < retries - 1:
                 st.warning(f"Rate limit reached. Retrying in {wait} seconds...")
                 time.sleep(wait)
@@ -93,7 +94,6 @@ def main():
     st.write("---")
     st.write("### Today's NFL Trivia Questions:")
 
-    # Collect user answers
     answers = []
     for idx, q in enumerate(questions, start=1):
         st.write(f"**Question {idx}:** {q['question']}")
@@ -104,7 +104,6 @@ def main():
     if st.button("Submit All Answers"):
         score = sum(1 for ans, q in zip(answers, questions) if ans == q['answer'])
         st.success(f"You scored {score} out of {len(questions)}!")
-        # Optionally show correct answers for review
         for idx, q in enumerate(questions, start=1):
             st.write(f"Question {idx} Correct Answer: **{q['answer']}**")
 
