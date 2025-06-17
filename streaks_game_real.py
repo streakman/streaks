@@ -5,7 +5,7 @@ import time
 import os
 import openai
 
-# Load API keys from Streamlit secrets or environment variables
+# Load API keys
 OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
 API_SPORTS_KEY = st.secrets.get("API_SPORTS_API_KEY") or os.getenv("API_SPORTS_API_KEY")
 
@@ -15,21 +15,18 @@ if not OPENAI_API_KEY or not API_SPORTS_KEY:
 
 openai.api_key = OPENAI_API_KEY
 
-# API-SPORTS official basketball API base URL
-API_SPORTS_BASE_URL = "https://api-basketball-v1.p.rapidapi.com"  # Replace if your docs say otherwise!
-
-# Note: Even official API-SPORTS uses the "rapidapi" subdomain in some docs.
-# But if your API key is directly from api-sports.io, verify the base URL in your dashboard.
+# This is the **correct** base URL for direct api-sports.io subscription (check your docs)
+API_SPORTS_BASE_URL = "https://api.api-sports.io/basketball"
 
 headers = {
-    "x-apisports-key": API_SPORTS_KEY,
+    "Authorization": f"Bearer {API_SPORTS_KEY}",
     "Content-Type": "application/json"
 }
 
 def fetch_nba_teams():
     """
-    Fetch NBA teams from API-SPORTS.
-    League ID for NBA is 12, season example is 2023
+    Fetch NBA teams from API-SPORTS direct API.
+    League ID for NBA is 12, season example is 2023.
     """
     url = f"{API_SPORTS_BASE_URL}/teams"
     params = {"league": "12", "season": "2023"}
@@ -38,7 +35,7 @@ def fetch_nba_teams():
         res = requests.get(url, headers=headers, params=params, timeout=10)
         res.raise_for_status()
         data = res.json()
-        
+
         if not data or "response" not in data:
             st.warning("Unexpected API response structure.")
             return []
@@ -58,9 +55,6 @@ def fetch_nba_teams():
         return []
 
 def generate_trivia_questions(data_summary, retries=3, wait=10):
-    """
-    Use OpenAI to generate trivia questions based on teams data.
-    """
     prompt = (
         "Generate 10 multiple-choice NBA trivia questions using this teams data:\n"
         f"{json.dumps(data_summary, indent=2)}\n"
