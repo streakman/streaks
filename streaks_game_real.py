@@ -5,66 +5,53 @@ import time
 import os
 import openai
 
-# Load API keys
+# Load API keys from Streamlit secrets or environment variables
+API_FOOTBALL_KEY = st.secrets.get("API_FOOTBALL_KEY") or os.getenv("API_FOOTBALL_KEY")
 OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
-API_SPORTS_KEY = st.secrets.get("API_SPORTS_API_KEY") or os.getenv("API_SPORTS_API_KEY")
 
-if not OPENAI_API_KEY or not API_SPORTS_KEY:
-    st.error("Please set your OPENAI_API_KEY and API_SPORTS_API_KEY in Streamlit secrets or environment variables.")
+if not API_FOOTBALL_KEY or not OPENAI_API_KEY:
+    st.error("Please set your API_FOOTBALL_KEY and OPENAI_API_KEY in Streamlit secrets or environment variables.")
     st.stop()
 
 openai.api_key = OPENAI_API_KEY
 
-# This is the **correct** base URL for direct api-sports.io subscription (check your docs)
-API_SPORTS_BASE_URL = "https://api.api-sports.io/basketball"
-
-headers = {
-    "Authorization": f"Bearer {API_SPORTS_KEY}",
-    "Content-Type": "application/json"
+HEADERS = {
+    "x-apisports-key": API_FOOTBALL_KEY
 }
 
-def fetch_nba_teams():
-    """
-    Fetch NBA teams from API-SPORTS direct API.
-    League ID for NBA is 12, season example is 2023.
-    """
-    url = f"{API_SPORTS_BASE_URL}/teams"
-    params = {"league": "12", "season": "2023"}
-    
+# Fetch NFL teams for the 2023 season
+def fetch_nfl_teams():
+    url = "https://v1.americanfootball.api-sports.io/teams?season=2023"
     try:
-        res = requests.get(url, headers=headers, params=params, timeout=10)
-        res.raise_for_status()
-        data = res.json()
-
-        if not data or "response" not in data:
-            st.warning("Unexpected API response structure.")
-            return []
-        
-        teams = []
-        for team in data["response"]:
-            teams.append({
-                "name": team["team"]["name"],
-                "city": team["team"]["city"],
-                "abbreviation": team["team"]["abbreviation"],
-                "logo": team["team"]["logo"]
-            })
-        return teams
-
-    except requests.exceptions.RequestException as e:
-        st.error(f"Network/API error fetching NBA teams: {e}")
+        response = requests.get(url, headers=HEADERS, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        teams = data.get("response", [])
+        # Extract team names and cities
+        simplified_teams = [{
+            "name": team["team"]["name"],
+            "city": team["team"]["city"],
+            "conference": team["team"].get("conference", "N/A"),
+            "division": team["team"].get("division", "N/A"),
+        } for team in teams]
+        return simplified_teams
+    except Exception as e:
+        st.error(f"Error fetching NFL teams from API-Football: {e}")
         return []
 
+# Generate trivia questions using OpenAI
 def generate_trivia_questions(data_summary, retries=3, wait=10):
     prompt = (
-        "Generate 10 multiple-choice NBA trivia questions using this teams data:\n"
+        "Create 10 interesting NFL trivia questions with 4 multiple-choice answers each. "
+        "Use the following NFL teams data to create questions about teams, cities, conferences, or divisions:\n"
         f"{json.dumps(data_summary, indent=2)}\n"
-        "Format as a JSON list of objects with 'question', 'choices' (list of 4 strings), and 'answer' (correct choice)."
+        "Return the questions in JSON format as a list. Each item should have 'question', 'choices' (list of 4 strings), and 'answer' (correct choice string)."
     )
 
     for attempt in range(retries):
         try:
             response = openai.chat.completions.create(
-                model="gpt-4o-mini",
+                model="gpt-3.5-turbo",
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=1100,
                 temperature=0.7,
@@ -73,11 +60,14 @@ def generate_trivia_questions(data_summary, retries=3, wait=10):
             return json.loads(questions_json)
         except openai.error.RateLimitError:
             if attempt < retries - 1:
-                st.warning(f"Rate limit hit. Retrying in {wait} seconds...")
+                st.warning(f"Rate limit reached. Retrying in {wait} seconds...")
                 time.sleep(wait)
             else:
-                st.error("Rate limit exceeded. Try again later.")
+                st.error("Rate limit exceeded. Please try again later.")
                 return []
+        except json.JSONDecodeError:
+            st.error("Failed to decode JSON from OpenAI response. Response was:\n" + questions_json)
+            return []
         except Exception as e:
             st.error(f"OpenAI error: {e}")
             return []
@@ -87,27 +77,30 @@ def get_daily_questions(data_summary):
     return generate_trivia_questions(data_summary)
 
 def main():
-    st.title("NBA Teams Trivia with API-SPORTS")
+    st.title("NFL Trivia Game - Powered by API-Football & OpenAI")
 
-    st.info("Fetching NBA teams data...")
-    teams = fetch_nba_teams()
+    st.info("Fetching NFL teams data...")
+    nfl_teams = fetch_nfl_teams()
 
-    if not teams:
-        st.warning("No NBA teams data available.")
+    if not nfl_teams:
+        st.warning("No NFL teams data available. Cannot generate trivia.")
         return
 
-    st.info("Generating trivia questions...")
-    questions = get_daily_questions(teams)
+    st.info("Generating trivia questions (this may take a few seconds)...")
+    questions = get_daily_questions(nfl_teams)
 
     if not questions:
-        st.warning("No questions generated.")
+        st.warning("No trivia questions generated.")
         return
 
-    for i, q in enumerate(questions, 1):
-        st.write(f"### Question {i}: {q['question']}")
-        choice = st.radio("Select your answer:", q["choices"], key=f"q{i}")
+    st.write("---")
+    st.write("### Today's NFL Trivia Questions:")
 
-        if st.button("Submit Answer", key=f"submit_{i}"):
+    for idx, q in enumerate(questions, start=1):
+        st.write(f"**Question {idx}:** {q['question']}")
+        choice = st.radio("Select your answer:", q['choices'], key=f"q{idx}")
+
+        if st.button("Submit Answer", key=f"submit_{idx}"):
             if choice == q["answer"]:
                 st.success("Correct! 🎉")
             else:
