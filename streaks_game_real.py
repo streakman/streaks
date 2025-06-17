@@ -1,118 +1,116 @@
 import streamlit as st
-import requests
 import openai
 import json
+import random
 import time
 from openai.error import RateLimitError
 
-# API key used for all sports APIs (including hockey)
-API_KEY = st.secrets["api_football_key"]
-openai.api_key = st.secrets["openai_api_key"]
+# Set your OpenAI API key
+OPENAI_API_KEY = st.secrets["openai_api_key"]
+openai.api_key = OPENAI_API_KEY
 
+# Static hockey teams list to avoid API limits
 @st.cache_data(ttl=86400)
 def fetch_hockey_teams():
-    st.info("[DEBUG] Fetching Hockey teams from API-Hockey")
-    url = "https://v3.icehockey.api-sports.io/teams?league=57&season=2023"
-    headers = {"x-apisports-key": API_KEY}
-    response = requests.get(url, headers=headers)
-    st.info(f"[DEBUG] API response status: {response.status_code}")
-    if response.status_code != 200:
-        raise Exception("Failed to fetch Hockey teams.")
-    teams = response.json().get("response", [])
-    team_names = [team["team"]["name"] for team in teams]
-    st.info(f"[DEBUG] Retrieved {len(team_names)} teams")
-    return team_names
+    st.info("[DEBUG] Using static hockey teams data")
+    return [
+        "Boston Bruins",
+        "Chicago Blackhawks",
+        "Detroit Red Wings",
+        "Montreal Canadiens",
+        "New York Rangers",
+        "Toronto Maple Leafs"
+    ]
 
+# Extract JSON array from OpenAI response
 def extract_json(response_text):
     st.info("[DEBUG] Extracting JSON from OpenAI response")
     try:
         start = response_text.index("[")
         end = response_text.rindex("]") + 1
-        return response_text[start:end]
-    except ValueError as ve:
-        st.error(f"[DEBUG] JSON extraction error: {ve}")
+        json_str = response_text[start:end]
+        st.info("[DEBUG] Successfully extracted JSON")
+        return json_str
+    except Exception as e:
+        st.error(f"[DEBUG] JSON extraction error: {e}")
         return "[]"
 
+# Generate trivia questions with OpenAI
 def generate_trivia_questions(teams_data):
-    st.info("[DEBUG] Generating 3 Hockey trivia questions with OpenAI")
+    st.info("[DEBUG] Generating trivia questions from OpenAI")
     prompt = (
-        "Generate 3 unique hockey trivia questions using only the following team names: "
+        "Generate 3 unique hockey trivia questions using only the following teams: "
         f"{', '.join(teams_data)}. Each question should be a dictionary with keys: "
-        "'question', 'choices' (4 options), and 'answer'. Make sure answers are accurate."
+        "'question' (str), 'choices' (list of 4 strings), and 'answer' (one of the choices). "
+        "Output only a JSON array of these questions."
     )
     try:
         response = openai.ChatCompletion.create(
             model="gpt-4",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7,
-            max_tokens=1000,
+            max_tokens=800,
         )
-        raw_text = response.choices[0].message.content
-        st.info(f"[DEBUG] OpenAI raw response snippet: {raw_text[:200]}...")
-        questions_json = extract_json(raw_text)
-        questions = json.loads(questions_json)
-        st.info(f"[DEBUG] Parsed {len(questions)} questions")
+        raw = response.choices[0].message.content
+        st.info(f"[DEBUG] Raw OpenAI response snippet: {raw[:200]}...")
+        clean_json = extract_json(raw)
+        questions = json.loads(clean_json)
+        st.info(f"[DEBUG] Parsed {len(questions)} questions successfully")
         return questions
     except RateLimitError:
-        st.warning("[DEBUG] RateLimitError caught, please try later.")
-        raise
-    except json.JSONDecodeError as jde:
-        st.error(f"[DEBUG] JSON decoding error: {jde}")
+        st.warning("[DEBUG] OpenAI RateLimitError: Please try again later.")
+        return []
+    except json.JSONDecodeError as e:
+        st.error(f"[DEBUG] JSON decoding error: {e}")
         return []
     except Exception as e:
-        st.error(f"[DEBUG] Error generating questions: {e}")
+        st.error(f"[DEBUG] Unexpected error: {e}")
         return []
 
+# Retry wrapper with caching
 @st.cache_data(ttl=86400)
 def get_daily_questions(teams_data):
     retries = 3
     for attempt in range(retries):
-        try:
-            questions = generate_trivia_questions(teams_data)
-            if questions:
-                return questions
-            else:
-                st.warning("[DEBUG] No questions generated, retrying...")
-        except RateLimitError:
-            wait = 5 + attempt * 5
-            st.warning(f"Rate limited. Retrying in {wait} seconds...")
+        st.info(f"[DEBUG] get_daily_questions attempt {attempt + 1}")
+        questions = generate_trivia_questions(teams_data)
+        if questions:
+            return questions
+        else:
+            wait = 3 + attempt * 3
+            st.info(f"[DEBUG] Waiting {wait}s before retry...")
             time.sleep(wait)
-        except Exception as e:
-            st.error(f"[DEBUG] Exception on attempt {attempt + 1}: {e}")
-            return []
     return []
 
 def main():
-    st.title("Hockey Trivia Game Powered by API-Hockey & OpenAI")
+    st.title("Hockey Trivia Game Powered by OpenAI")
+    st.write("Test your hockey knowledge with AI-generated trivia questions!")
 
-    st.info("Fetching Hockey teams data from API-Hockey...")
-    try:
-        teams = fetch_hockey_teams()
-    except Exception as e:
-        st.error(f"Error fetching hockey teams: {e}")
-        return
+    teams = fetch_hockey_teams()
+    st.info(f"[DEBUG] Loaded {len(teams)} hockey teams")
 
-    st.info("Generating trivia questions, please wait...")
+    st.info("Generating 3 trivia questions, please wait...")
     questions = get_daily_questions(teams)
 
     if not questions:
         st.error("No trivia questions available right now. Please try again later.")
         return
 
-    st.markdown("### Today's Hockey Trivia Questions")
     user_answers = []
+    for i, q in enumerate(questions, 1):
+        try:
+            question = q.get("question", f"Missing question {i}")
+            choices = q.get("choices", [])
+            if not isinstance(choices, list) or len(choices) != 4:
+                raise ValueError("Invalid choices format.")
 
-    for idx, q in enumerate(questions, 1):
-        question_text = q.get("question", f"Missing question {idx}")
-        choices = q.get("choices", [])
-        if not isinstance(choices, list) or len(choices) != 4:
-            st.error(f"Invalid choices format for question {idx}")
-            continue
-
-        st.write(f"**Q{idx}:** {question_text}")
-        choice = st.radio("Your answer:", choices, key=f"q{idx}")
-        user_answers.append(choice)
-        st.write("---")
+            st.write(f"**Q{i}:** {question}")
+            choice = st.radio(f"Your answer for Q{i}:", choices, key=f"q{i}")
+            user_answers.append(choice)
+            st.write("---")
+        except Exception as e:
+            st.error(f"Error displaying question {i}: {e}")
+            user_answers.append(None)
 
     if st.button("Submit Answers"):
         score = 0
@@ -120,8 +118,8 @@ def main():
             correct = q.get("answer")
             if a == correct:
                 score += 1
-            st.markdown(f"**Q{i} Answer:** {correct}")
-        st.success(f"You scored {score} / {len(questions)}!")
+            st.markdown(f"**Q{i} answer:** {correct}")
+        st.success(f"Your score: {score} out of {len(questions)}")
 
 if __name__ == "__main__":
     main()
