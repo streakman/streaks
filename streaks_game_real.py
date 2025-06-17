@@ -21,35 +21,29 @@ def fetch_nfl_teams():
     st.info("Fetching NFL teams data from API-Football...")
     try:
         conn = http.client.HTTPSConnection("v3.football.api-sports.io")
-        headers = {
-            'x-apisports-key': API_FOOTBALL_KEY
-        }
+        headers = {'x-apisports-key': API_FOOTBALL_KEY}
         conn.request("GET", "/teams?league=3&season=2023", headers=headers)
         res = conn.getresponse()
         data = res.read()
         data_json = json.loads(data.decode("utf-8"))
-
         if data_json.get("errors"):
             st.error(f"API error: {data_json['errors']}")
             return []
-
         teams = data_json.get("response", [])
         return [{"name": t["team"]["name"], "stadium": t.get("venue", {}).get("name", "N/A")} for t in teams]
-
     except Exception as e:
         st.error(f"Error fetching teams: {e}")
         return []
 
 def extract_json(text):
     match = re.search(r"\[.*\]", text, re.DOTALL)
-    if match:
-        return match.group(0)
-    return text
+    return match.group(0) if match else None
 
 def call_openai_for_questions(teams_data):
     prompt = (
-        "Create 10 NFL trivia questions. Each should be a JSON object with: "
-        "'question', 'choices' (a list), and 'answer'. Use the following data:\n\n"
+        "Create 10 NFL trivia questions as a JSON array. Each item should be a JSON object with keys: "
+        "'question' (string), 'choices' (list of 4 strings), and 'answer' (the correct string). "
+        "Use the following team data:\n\n"
         f"{json.dumps(teams_data, indent=2)}"
     )
 
@@ -60,9 +54,21 @@ def call_openai_for_questions(teams_data):
         temperature=0.7,
     )
 
-    questions_json_raw = response.choices[0].message.content
-    questions_json_clean = extract_json(questions_json_raw)
-    return json.loads(questions_json_clean)
+    raw_content = response.choices[0].message.content
+    st.code(raw_content, language="json")  # Debug view in Streamlit
+
+    json_block = extract_json(raw_content)
+    if not json_block:
+        raise ValueError("Could not extract JSON from OpenAI output.")
+
+    try:
+        parsed = json.loads(json_block)
+        if isinstance(parsed, list) and all(isinstance(q, dict) for q in parsed):
+            return parsed
+        else:
+            raise ValueError("Parsed content is not a list of dicts.")
+    except json.JSONDecodeError as e:
+        raise ValueError(f"JSON decode error: {e}")
 
 def generate_trivia_questions_with_retry(teams_data, retries=3, wait=10):
     for attempt in range(retries):
@@ -76,7 +82,7 @@ def generate_trivia_questions_with_retry(teams_data, retries=3, wait=10):
                 st.error("OpenAI rate limit hit. Try again later.")
                 return []
         except Exception as e:
-            st.error(f"Failed to parse trivia questions: {e}")
+            st.error(f"Trivia generation failed: {e}")
             return []
 
 @st.cache_data(ttl=86400)
