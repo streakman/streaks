@@ -1,15 +1,16 @@
 {
   "name": "Streaks Dev Container",
+  "image": "mcr.microsoft.com/vscode/devcontainers/python:3.11",  // Specify base image explicitly
   "features": {
     "ghcr.io/devcontainers/features/python:1": {
       "version": "3.11"
     }
   },
-  "postCreateCommand": "pip install -r requirements.txt",
+  "postCreateCommand": "pip install --upgrade pip && pip install -r requirements.txt",
   "customizations": {
     "vscode": {
       "settings": {
-        "python.defaultInterpreterPath": "/usr/local/bin/python"
+        "python.defaultInterpreterPath": "/usr/local/bin/python3"
       },
       "extensions": [
         "ms-python.python",
