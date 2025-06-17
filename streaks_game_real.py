@@ -18,10 +18,24 @@ QUESTIONS_CACHE_FILE = "questions_cache.json"
 
 # Fetch NBA player data from TheSportsDB API (example: Lakers roster)
 def fetch_nba_top_scorers():
-    url = f"https://www.thesportsdb.com/api/v1/json/{THESPORTSDB_API_KEY}/searchplayers.php?t=Los Angeles Lakers"
-    res = requests.get(url)
+    # 1. Find team ID for Lakers
+    team_search_url = f"https://www.thesportsdb.com/api/v1/json/{THESPORTSDB_API_KEY}/searchteams.php?t=Los Angeles Lakers"
+    team_res = requests.get(team_search_url)
+    if team_res.status_code != 200:
+        st.error(f"Error searching for team: {team_res.status_code}")
+        return None
+    try:
+        team_data = team_res.json()
+        team_id = team_data["teams"][0]["idTeam"]
+    except Exception as e:
+        st.error(f"Could not extract team ID: {e}")
+        return None
+
+    # 2. Use team ID to fetch player list
+    players_url = f"https://www.thesportsdb.com/api/v1/json/{THESPORTSDB_API_KEY}/lookup_all_players.php?id={team_id}"
+    res = requests.get(players_url)
     if res.status_code != 200:
-        st.error(f"Error fetching data from TheSportsDB: {res.status_code}")
+        st.error(f"Error fetching players: {res.status_code}")
         return None
     try:
         data = res.json()
