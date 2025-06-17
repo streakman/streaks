@@ -50,7 +50,7 @@ def generate_trivia_questions(data_summary):
         "]"
     )
     response = openai.chat.completions.create(
-        model="gpt-4o",
+        model="gpt-3.5-turbo",
         messages=[{"role": "user", "content": prompt}],
         max_tokens=1100,
         temperature=0.8,
