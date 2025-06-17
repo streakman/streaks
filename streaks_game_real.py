@@ -1,131 +1,145 @@
-import streamlit as st
+import os
 import requests
-import openai
-import datetime
-import random
 import json
-import time
+import random
+import streamlit as st
+from datetime import date
+import openai
 
-# === Configuration ===
-THESPORTSDB_API_KEY = "123/"  # <-- Replace with your actual key
-OPENAI_API_KEY = "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"   # <-- Replace with your actual OpenAI key
-THESPORTSDB_BASE_URL = f"https://www.thesportsdb.com/api/v1/json/{THESPORTSDB_API_KEY}"
+# Load API keys from environment variables
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+THESPORTSDB_API_KEY = os.getenv("THESPORTSDB_API_KEY")
+
 openai.api_key = OPENAI_API_KEY
 
-# === Helper Functions ===
-def fetch_random_team_id():
-    leagues = ["NBA", "NFL", "NHL", "MLB"]
-    league = random.choice(leagues)
-    url = f"{THESPORTSDB_BASE_URL}/search_all_teams.php?l={league}"
+# Constants
+NUM_QUESTIONS = 10
+STATS_FILE = "player_stats.json"
+
+
+def fetch_nba_top_scorers():
+    # Example: fetch NBA top scorers of current season from TheSportsDB
+    # Correct URL format:
+    url = f"https://www.thesportsdb.com/api/v1/json/{THESPORTSDB_API_KEY}/lookup_all_players.php?id=134860"  # NBA Team ID example: Lakers = 134860
     res = requests.get(url)
     if res.status_code != 200:
-        st.error("Error fetching teams from TheSportsDB")
-        return None
-    try:
-        teams = res.json()["teams"]
-        team = random.choice(teams)
-        return team["idTeam"], team["strTeam"]
-    except Exception as e:
-        st.error(f"Failed to extract team data: {e}")
-        return None
+        st.error(f"Error fetching NBA data: {res.status_code}")
+        return []
+    data = res.json()
+    players = data.get("player", [])
+    # Filter players with scoring info if available (or just return top 20 random players)
+    return random.sample(players, min(20, len(players))) if players else []
 
-def fetch_team_players(team_id):
-    url = f"{THESPORTSDB_BASE_URL}/lookup_all_players.php?id={team_id}"
-    res = requests.get(url)
-    if res.status_code != 200:
-        st.error("Error fetching players from TheSportsDB")
-        return None
-    try:
-        return res.json()["player"]
-    except Exception as e:
-        st.error(f"Failed to extract player data: {e}")
-        return None
 
-def generate_trivia_questions(summary_data):
-    prompt = f"""
-    You are a sports trivia AI. Based on the following data:
-    {summary_data}
-    Generate 10 multiple-choice sports trivia questions about teams, players, or historical stats across sports. Each question must have 4 answer choices and one correct answer clearly marked.
-    Respond in JSON format:
-    [{{"question": ..., "choices": [..], "correct_answer": ...}}, ...]
-    """
-    response = openai.ChatCompletion.create(
+def generate_trivia_questions(data_summary):
+    # Prepare prompt for OpenAI with raw data_summary (list of player dicts)
+    prompt = (
+        "Create 10 interesting sports trivia questions with 4 multiple-choice answers each. "
+        "Use the following player data from various sports including NBA, NFL, MLB, etc., "
+        "based on their historical stats and accolades. Format as a JSON list of questions, each "
+        "with 'question', 'choices' (list of 4 strings), and 'answer' (correct choice string).\n\n"
+        f"Player data: {json.dumps(data_summary)}\n\n"
+        "Example output:\n"
+        "[\n"
+        "  {\n"
+        "    \"question\": \"Which NBA player scored the most points in the 2023 season?\",\n"
+        "    \"choices\": [\"Player A\", \"Player B\", \"Player C\", \"Player D\"],\n"
+        "    \"answer\": \"Player A\"\n"
+        "  },\n"
+        "  ...\n"
+        "]"
+    )
+    response = openai.chat.completions.create(
         model="gpt-4o",
         messages=[{"role": "user", "content": prompt}],
-        max_tokens=1100
+        max_tokens=1100,
+        temperature=0.8,
     )
+    text = response.choices[0].message.content
     try:
-        questions = json.loads(response["choices"][0]["message"]["content"])
-        return questions
+        questions = json.loads(text)
+        if isinstance(questions, list):
+            return questions
     except Exception as e:
-        st.error(f"Error parsing GPT response: {e}")
-        return []
+        st.error(f"Failed to parse questions from OpenAI response: {e}")
+    return []
 
-def get_today_questions():
-    today = datetime.date.today().isoformat()
-    filename = f"questions_{today}.json"
-    try:
-        with open(filename, "r") as f:
+
+def load_stats():
+    if os.path.exists(STATS_FILE):
+        with open(STATS_FILE, "r") as f:
             return json.load(f)
-    except:
-        # Generate new questions
-        team_id, team_name = fetch_random_team_id()
-        players = fetch_team_players(team_id)
-        data_summary = json.dumps(players)
+    return {}
+
+
+def save_stats(stats):
+    with open(STATS_FILE, "w") as f:
+        json.dump(stats, f, indent=2)
+
+
+def main():
+    st.title("Daily Sports Trivia Streaks")
+
+    stats = load_stats()
+    today = str(date.today())
+    user = st.text_input("Enter your name to start playing:", key="user_name").strip()
+    if not user:
+        st.info("Please enter your name to begin.")
+        return
+
+    user_stats = stats.get(user, {})
+    if user_stats.get("last_played") == today:
+        st.write(f"Welcome back, {user}! You have already played today.")
+        st.write(f"Your current streak is: {user_stats.get('streak', 0)}")
+        return
+
+    with st.spinner("Fetching sports data..."):
+        data_summary = fetch_nba_top_scorers()
+
+    if not data_summary:
+        st.error("Could not fetch sports data to generate questions. Try again later.")
+        return
+
+    with st.spinner("Generating today's questions..."):
         questions = generate_trivia_questions(data_summary)
-        with open(filename, "w") as f:
-            json.dump(questions, f)
-        return questions
 
-def update_user_stats(username, correct_count):
-    today = datetime.date.today().isoformat()
-    stats_file = f"stats_{today}.json"
-    try:
-        with open(stats_file, "r") as f:
-            stats = json.load(f)
-    except:
-        stats = {}
-    if username not in stats:
-        stats[username] = {"score": 0}
-    stats[username]["score"] += correct_count
-    with open(stats_file, "w") as f:
-        json.dump(stats, f)
+    if not questions:
+        st.error("Failed to generate questions. Please try again later.")
+        return
 
-# === Streamlit UI ===
-st.title("🏆 Daily Sports Streaks Game")
+    correct_answers = 0
 
-username = st.text_input("Enter your name to begin:")
-if username:
-    questions = get_today_questions()
-    correct = 0
+    for i, q in enumerate(questions, 1):
+        st.markdown(f"### Question {i}:")
+        st.write(q["question"])
+        choices = q["choices"]
+        user_choice = st.radio("Select your answer:", choices, key=f"q{i}")
 
-    for i, q in enumerate(questions):
-        st.markdown(f"### Question {i + 1}: {q['question']}")
-
-        # Countdown timer
-        count = st.empty()
-        for sec in range(10, 0, -1):
-            count.markdown(f"⏱️ Time left: {sec}s")
-            time.sleep(1)
-        count.markdown("⏱️ Time's up!")
-
-        choice = st.radio("Choose an answer:", q['choices'], key=f"q{i}")
-        if st.button(f"Submit Answer {i + 1}", key=f"submit_{i}"):
-            if choice == q['correct_answer']:
-                st.success("✅ Correct!")
-                correct += 1
+        if st.button("Submit Answer", key=f"submit_{i}"):
+            if user_choice == q["answer"]:
+                st.success("Correct!")
+                correct_answers += 1
             else:
-                st.error(f"❌ Wrong. Correct answer was: {q['correct_answer']}")
+                st.error(f"Wrong! Correct answer: {q['answer']}")
 
-    st.markdown(f"## ✅ You got {correct} out of {len(questions)} correct!")
-    update_user_stats(username, correct)
+    st.write(f"Your total correct answers today: {correct_answers} out of {NUM_QUESTIONS}")
 
-    st.markdown("### 📊 Leaderboard (Today)")
-    try:
-        with open(f"stats_{datetime.date.today().isoformat()}.json", "r") as f:
-            stats = json.load(f)
-        sorted_stats = sorted(stats.items(), key=lambda x: -x[1]['score'])
-        for rank, (user, data) in enumerate(sorted_stats, 1):
-            st.write(f"{rank}. {user} - {data['score']} points")
-    except:
-        st.info("No stats yet for today.")
+    # Update stats
+    streak = user_stats.get("streak", 0)
+    if correct_answers >= 7:  # example threshold for a win streak
+        streak += 1
+        st.balloons()
+    else:
+        streak = 0
+
+    stats[user] = {
+        "last_played": today,
+        "streak": streak,
+        "last_score": correct_answers,
+    }
+    save_stats(stats)
+    st.write(f"Your current winning streak: {streak}")
+
+
+if __name__ == "__main__":
+    main()
